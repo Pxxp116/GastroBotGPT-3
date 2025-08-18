@@ -233,6 +233,11 @@ class BackendClient:
             
             codigo_reserva = codigo_reserva.strip().upper()
             
+            # Convertir 'comensales' a 'personas' si existe
+            backend_cambios = cambios.copy()
+            if 'comensales' in backend_cambios:
+                backend_cambios['personas'] = backend_cambios.pop('comensales')
+            
             # Llamar al endpoint con código
             logger.info(f"Modificando reserva con código: {codigo_reserva}")
             
@@ -241,7 +246,7 @@ class BackendClient:
                 endpoint="/modificar-reserva",
                 data={
                     "codigo_reserva": codigo_reserva,
-                    **cambios
+                    **backend_cambios
                 }
             )
             
@@ -249,10 +254,15 @@ class BackendClient:
             # Si tenemos ID numérico (para compatibilidad)
             logger.info(f"Modificando reserva con ID: {id_reserva}")
             
+            # Convertir 'comensales' a 'personas' si existe
+            backend_cambios = cambios.copy()
+            if 'comensales' in backend_cambios:
+                backend_cambios['personas'] = backend_cambios.pop('comensales')
+            
             result = await self._make_request(
                 method="PUT",
                 endpoint=f"/modificar-reserva/{id_reserva}",
-                data=cambios
+                data=backend_cambios
             )
         
         # Manejar error de código no encontrado
