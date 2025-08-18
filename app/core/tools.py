@@ -1,27 +1,33 @@
-from typing import Dict, Any, List, Optional
+"""
+Definición y ejecución de herramientas para el chatbot
+Versión corregida con manejo de códigos de reserva obligatorios
+"""
+
+from typing import Dict, Any, List
 import logging
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 def get_tool_definitions() -> List[Dict[str, Any]]:
-    """Devuelve las definiciones de tools para OpenAI"""
+    """Define las herramientas disponibles para el asistente"""
+    
     return [
         {
             "type": "function",
             "function": {
                 "name": "check_availability",
-                "description": "Verifica disponibilidad de mesas para una fecha y hora específicas",
+                "description": "Verifica disponibilidad de mesas para una fecha y hora específica",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "fecha": {
                             "type": "string",
-                            "description": "Fecha en formato YYYY-MM-DD"
+                            "description": "Fecha para verificar (YYYY-MM-DD)"
                         },
                         "hora": {
                             "type": "string",
-                            "description": "Hora en formato HH:MM"
+                            "description": "Hora para verificar (HH:MM)"
                         },
                         "comensales": {
                             "type": "integer",
@@ -31,7 +37,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                         },
                         "duracion_min": {
                             "type": "integer",
-                            "description": "Duración de la reserva en minutos",
+                            "description": "Duración estimada en minutos",
                             "default": 90
                         }
                     },
@@ -50,7 +56,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                     "properties": {
                         "nombre": {
                             "type": "string",
-                            "description": "Nombre del cliente"
+                            "description": "Nombre completo del cliente"
                         },
                         "telefono": {
                             "type": "string",
@@ -92,44 +98,28 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "modify_reservation",
-                "description": "Modifica una reserva existente",
+                "description": "Modifica una reserva existente. REQUIERE el código de reserva obligatoriamente",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "id_reserva": {
-                            "type": "integer",
-                            "description": "ID de la reserva a modificar"
-                        },
-                        "nombre": {
+                        "codigo_reserva": {
                             "type": "string",
-                            "description": "Nombre del cliente (para buscar si no hay ID)"
-                        },
-                        "telefono": {
-                            "type": "string",
-                            "description": "Teléfono del cliente (para buscar si no hay ID)"
-                        },
-                        "fecha_antigua": {
-                            "type": "string",
-                            "description": "Fecha original de la reserva"
-                        },
-                        "hora_antigua": {
-                            "type": "string",
-                            "description": "Hora original de la reserva"
+                            "description": "Código de reserva de 8 caracteres (OBLIGATORIO - siempre pedir al cliente)"
                         },
                         "cambios": {
                             "type": "object",
                             "properties": {
-                                "fecha": {"type": "string"},
-                                "hora": {"type": "string"},
-                                "comensales": {"type": "integer"},
-                                "zona": {"type": "string"},
-                                "alergias": {"type": "string"},
-                                "comentarios": {"type": "string"}
+                                "fecha": {"type": "string", "description": "Nueva fecha (YYYY-MM-DD)"},
+                                "hora": {"type": "string", "description": "Nueva hora (HH:MM)"},
+                                "comensales": {"type": "integer", "description": "Nuevo número de personas"},
+                                "zona": {"type": "string", "description": "Nueva zona preferida"},
+                                "alergias": {"type": "string", "description": "Nuevas alergias"},
+                                "comentarios": {"type": "string", "description": "Nuevos comentarios"}
                             },
                             "additionalProperties": False
                         }
                     },
-                    "required": ["cambios"],
+                    "required": ["codigo_reserva", "cambios"],
                     "additionalProperties": False
                 }
             }
@@ -138,35 +128,38 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "cancel_reservation",
-                "description": "Cancela una reserva existente",
+                "description": "Cancela una reserva existente. REQUIERE el código de reserva obligatoriamente",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "id_reserva": {
-                            "type": "integer",
-                            "description": "ID de la reserva"
-                        },
-                        "nombre": {
+                        "codigo_reserva": {
                             "type": "string",
-                            "description": "Nombre del cliente"
-                        },
-                        "telefono": {
-                            "type": "string",
-                            "description": "Teléfono del cliente"
-                        },
-                        "fecha": {
-                            "type": "string",
-                            "description": "Fecha de la reserva"
-                        },
-                        "hora": {
-                            "type": "string",
-                            "description": "Hora de la reserva"
+                            "description": "Código de reserva de 8 caracteres (OBLIGATORIO - siempre pedir al cliente)"
                         },
                         "motivo": {
                             "type": "string",
-                            "description": "Motivo de la cancelación"
+                            "description": "Motivo de la cancelación (opcional)"
                         }
                     },
+                    "required": ["codigo_reserva"],
+                    "additionalProperties": False
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_reservation_info",
+                "description": "Obtiene información de una reserva por su código",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "codigo_reserva": {
+                            "type": "string",
+                            "description": "Código de reserva de 8 caracteres"
+                        }
+                    },
+                    "required": ["codigo_reserva"],
                     "additionalProperties": False
                 }
             }
@@ -175,13 +168,13 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "get_menu",
-                "description": "Obtiene el menú completo del restaurante",
+                "description": "Obtiene el menú del restaurante",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "categoria": {
                             "type": "string",
-                            "description": "Categoría específica del menú"
+                            "description": "Categoría específica del menú (entrantes, principales, postres, bebidas)"
                         }
                     },
                     "additionalProperties": False
@@ -209,7 +202,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "get_policies",
-                "description": "Obtiene las políticas del restaurante",
+                "description": "Obtiene las políticas del restaurante (cancelaciones, grupos, etc)",
                 "parameters": {
                     "type": "object",
                     "properties": {},
@@ -236,8 +229,7 @@ async def execute_tool_call(
             return await backend_client.check_availability(
                 fecha=arguments.get("fecha"),
                 hora=arguments.get("hora"),
-                comensales=arguments.get("comensales"),
-                duracion_min=arguments.get("duracion_min", settings.DEFAULT_DURATION_MIN)
+                comensales=arguments.get("comensales")
             )
             
         elif function_name == "create_reservation":
@@ -260,16 +252,27 @@ async def execute_tool_call(
             
             if result.get("exito"):
                 conversation_state["current_reservation"] = result.get("reserva", {})
+                # Guardar código de reserva en el estado
+                if result.get("codigo_reserva"):
+                    conversation_state["last_reservation_code"] = result["codigo_reserva"]
                 
             return result
             
         elif function_name == "modify_reservation":
+            # Extraer código de reserva
+            codigo_reserva = arguments.get("codigo_reserva")
+            
+            # Si no hay código, devolver error inmediato
+            if not codigo_reserva:
+                return {
+                    "exito": False,
+                    "mensaje": "📋 Para modificar tu reserva necesito tu código de confirmación.\nLo encuentras en el mensaje que recibiste al hacer la reserva (8 caracteres).",
+                    "requiere_codigo": True
+                }
+            
+            # Llamar al backend con el formato correcto
             result = await backend_client.modify_reservation(
-                id_reserva=arguments.get("id_reserva"),
-                nombre=arguments.get("nombre"),
-                telefono=arguments.get("telefono"),
-                fecha_antigua=arguments.get("fecha_antigua"),
-                hora_antigua=arguments.get("hora_antigua"),
+                codigo_reserva=codigo_reserva,
                 cambios=arguments.get("cambios", {})
             )
             
@@ -279,14 +282,39 @@ async def execute_tool_call(
             return result
             
         elif function_name == "cancel_reservation":
-            return await backend_client.cancel_reservation(
-                id_reserva=arguments.get("id_reserva"),
-                nombre=arguments.get("nombre"),
-                telefono=arguments.get("telefono"),
-                fecha=arguments.get("fecha"),
-                hora=arguments.get("hora"),
+            # Extraer código de reserva
+            codigo_reserva = arguments.get("codigo_reserva")
+            
+            # Si no hay código, devolver error inmediato
+            if not codigo_reserva:
+                return {
+                    "exito": False,
+                    "mensaje": "🔍 Para cancelar necesito tu código de reserva.\nEs un código de 8 caracteres que recibiste al confirmar (ej: XYZ78901).",
+                    "requiere_codigo": True
+                }
+            
+            # Llamar al backend con el formato correcto
+            result = await backend_client.cancel_reservation(
+                codigo_reserva=codigo_reserva,
                 motivo=arguments.get("motivo")
             )
+            
+            if result.get("exito"):
+                # Limpiar reserva actual del estado
+                conversation_state["current_reservation"] = {}
+                
+            return result
+            
+        elif function_name == "get_reservation_info":
+            codigo_reserva = arguments.get("codigo_reserva")
+            
+            if not codigo_reserva:
+                return {
+                    "exito": False,
+                    "mensaje": "Necesito el código de reserva para buscar la información."
+                }
+            
+            return await backend_client.get_reservation_by_code(codigo_reserva)
             
         elif function_name == "get_menu":
             return await backend_client.get_menu(
@@ -304,7 +332,8 @@ async def execute_tool_call(
         else:
             return {
                 "exito": False,
-                "error": f"Función no reconocida: {function_name}"
+                "error": f"Función no reconocida: {function_name}",
+                "mensaje": "Esta operación no está disponible"
             }
             
     except ImportError as e:
@@ -314,6 +343,13 @@ async def execute_tool_call(
             "error": "Backend client no disponible",
             "mensaje": "El sistema de reservas no está disponible en este momento"
         }
+    except TypeError as e:
+        logger.error(f"Error de tipo en {function_name}: {e}", exc_info=True)
+        return {
+            "exito": False,
+            "error": f"Error de parámetros: {str(e)}",
+            "mensaje": "Ha ocurrido un error con los datos proporcionados"
+        }
     except Exception as e:
         logger.error(f"Error ejecutando {function_name}: {e}", exc_info=True)
         return {
@@ -321,3 +357,58 @@ async def execute_tool_call(
             "error": str(e),
             "mensaje": "Ha ocurrido un error procesando tu solicitud"
         }
+
+def validate_tool_arguments(
+    function_name: str,
+    arguments: Dict[str, Any]
+) -> tuple[bool, str]:
+    """
+    Valida los argumentos antes de ejecutar la herramienta
+    Retorna (es_valido, mensaje_error)
+    """
+    
+    if function_name == "modify_reservation":
+        codigo = arguments.get("codigo_reserva")
+        if not codigo:
+            return False, "El código de reserva es obligatorio para modificar"
+        if len(codigo.strip()) != 8:
+            return False, "El código de reserva debe tener 8 caracteres"
+        if not arguments.get("cambios"):
+            return False, "Debe especificar qué desea modificar"
+            
+    elif function_name == "cancel_reservation":
+        codigo = arguments.get("codigo_reserva")
+        if not codigo:
+            return False, "El código de reserva es obligatorio para cancelar"
+        if len(codigo.strip()) != 8:
+            return False, "El código de reserva debe tener 8 caracteres"
+            
+    elif function_name == "create_reservation":
+        required = ["nombre", "telefono", "fecha", "hora", "comensales"]
+        missing = [field for field in required if not arguments.get(field)]
+        if missing:
+            return False, f"Faltan datos obligatorios: {', '.join(missing)}"
+            
+    elif function_name == "check_availability":
+        required = ["fecha", "hora", "comensales"]
+        missing = [field for field in required if not arguments.get(field)]
+        if missing:
+            return False, f"Faltan datos para verificar disponibilidad: {', '.join(missing)}"
+    
+    return True, ""
+
+def extract_reservation_code_from_message(message: str) -> str:
+    """
+    Intenta extraer un código de reserva del mensaje del usuario
+    Busca patrones de 8 caracteres alfanuméricos
+    """
+    import re
+    
+    # Buscar patrón de 8 caracteres alfanuméricos
+    pattern = r'\b[A-Z0-9]{8}\b'
+    matches = re.findall(pattern, message.upper())
+    
+    if matches:
+        return matches[0]
+    
+    return None
