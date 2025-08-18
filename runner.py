@@ -1,47 +1,24 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import os
 import sys
 
-print("=" * 50)
-print("GastroBot Orchestrator - Starting")
-print("=" * 50)
+# Añadir el directorio actual al path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Mostrar todas las variables de entorno (para debug)
-print("Environment variables:")
-for key, value in os.environ.items():
-    if key == "PORT":
-        print(f"  {key} = {value}")
-    elif "PASS" not in key.upper() and "KEY" not in key.upper() and "SECRET" not in key.upper():
-        print(f"  {key} = {value[:50]}..." if len(value) > 50 else f"  {key} = {value}")
+print(f"Runner.py executing from: {__file__}", flush=True)
+print(f"Working directory: {os.getcwd()}", flush=True)
+print(f"Python path: {sys.path}", flush=True)
 
 # Obtener puerto
-port = os.environ.get("PORT", "8000")
-print(f"\nPORT environment variable: '{port}'")
+port = int(os.environ.get("PORT", 8000))
+print(f"Starting on port: {port}", flush=True)
 
+# Intentar importar de varias formas
 try:
-    port = int(port)
-    print(f"Parsed port: {port}")
-except ValueError as e:
-    print(f"ERROR: Could not parse PORT '{port}' as integer: {e}")
-    print("Using default port 8000")
-    port = 8000
-
-print("=" * 50)
-
-# Importar y ejecutar
-try:
+    from app.main import app
     import uvicorn
-    print(f"Starting Uvicorn on 0.0.0.0:{port}")
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=port,
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 except ImportError as e:
-    print(f"ERROR: Could not import required modules: {e}")
-    print("Trying alternative start method...")
+    print(f"Import error: {e}", flush=True)
+    # Intento alternativo
     os.system(f"python -m uvicorn app.main:app --host 0.0.0.0 --port {port}")
-except Exception as e:
-    print(f"CRITICAL ERROR: {e}")
-    sys.exit(1)
