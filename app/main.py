@@ -10,14 +10,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Crear aplicación FastAPI
+# Crear aplicación
 app = FastAPI(
     title="GastroBot Orchestrator",
-    description="Orquestador inteligente para reservas de restaurante",
     version="1.0.0"
 )
 
-# Configurar CORS
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,27 +25,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Health check SIMPLE primero
+# Health checks
 @app.get("/")
 async def root():
-    return {"message": "GastroBot Orchestrator is running"}
+    return {"message": "GastroBot Orchestrator", "status": "running"}
 
 @app.get("/health")
 async def health_check():
-    return {
-        "status": "healthy",
-        "service": "gastrobot-orchestrator",
-        "port": os.environ.get("PORT", "unknown"),
-        "environment": "railway"
-    }
+    return {"status": "healthy", "service": "gastrobot-orchestrator"}
 
-# Importar y añadir routers DESPUÉS
+# Importar routers
 try:
     from app.api.chat import router as chat_router
     app.include_router(chat_router, prefix="/api")
     logger.info("✅ Chat router loaded")
-except Exception as e:
+except ImportError as e:
     logger.error(f"❌ Could not load chat router: {e}")
 
-# Log de inicio
-logger.info("🚀 GastroBot Orchestrator initialized")
+try:
+    from app.api.whatsapp import router as whatsapp_router
+    app.include_router(whatsapp_router, prefix="/api")
+    logger.info("✅ WhatsApp router loaded")
+except ImportError as e:
+    logger.warning(f"⚠️ WhatsApp router not available: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info(f"🚀 GastroBot started on port {os.environ.get('PORT', 'unknown')}")
+    logger.info(f"📱 WhatsApp webhook ready at /api/webhook/whatsapp")
