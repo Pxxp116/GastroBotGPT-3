@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  gastrobot-orchestrator:
+    build: .
+    container_name: gastrobot_orchestrator
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - BACKEND_BASE_URL=${BACKEND_BASE_URL}
+      - REDIS_URL=redis://redis:6379/0
+      - TIMEZONE=${TIMEZONE:-Europe/Madrid}
+      - DEFAULT_DURATION_MIN=${DEFAULT_DURATION_MIN:-90}
+    env_file:
+      - .env
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+    depends_on:
+      - redis
+    networks:
+      - gastrobot-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: gastrobot_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - gastrobot-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+volumes:
+  redis-data:
+
+networks:
+  gastrobot-network:
+    driver: bridge
