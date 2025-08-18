@@ -135,26 +135,30 @@ class BackendClient:
                 "alternativas": availability.get("alternativas", [])
             }
         
-        # Crear la reserva
+        # Crear la reserva con el formato correcto
         data = {
             "nombre": nombre,
             "telefono": telefono,
-            "email": "",  # Opcional
+            "email": "",  # Email vacío si no lo tenemos
             "fecha": fecha,
             "hora": hora,
-            "personas": comensales,
+            "personas": comensales,  # ← CAMBIO: usar "personas" no "comensales"
             "mesa_id": availability["mesa_disponible"]["id"],
             "duracion": settings.DEFAULT_DURATION_MIN,
             "notas": comentarios or "",
             "alergias": alergias or "",
-            "zona_preferida": zona
+            "zona_preferida": zona or ""
         }
+        
+        logger.info(f"Enviando datos de reserva: {data}")
         
         result = await self._make_request(
             method="POST",
             endpoint="/crear-reserva",
             data=data
         )
+        
+        logger.info(f"Respuesta del backend: {result}")
         
         return result
     
