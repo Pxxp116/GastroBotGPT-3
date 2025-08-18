@@ -186,9 +186,14 @@ class BackendClient:
                 "mensaje": "No se especificaron cambios"
             }
         
-        # Si no tenemos ID, intentar buscar la reserva
+        # Limpiar teléfono
+        if telefono:
+            telefono_limpio = telefono.replace("whatsapp:", "").replace("+", "").replace(" ", "")
+        else:
+            telefono_limpio = None
+        
+        # Si no tenemos ID, buscar la reserva
         if not id_reserva:
-            # Buscar en el espejo
             espejo = await self._make_request(
                 method="GET",
                 endpoint="/espejo"
@@ -196,30 +201,68 @@ class BackendClient:
             
             if espejo.get("exito"):
                 reservas = espejo.get("espejo", {}).get("reservas", [])
+                logger.info(f"📋 Total reservas en sistema: {len(reservas)}")
                 
                 # Buscar por coincidencia
                 for reserva in reservas:
+                    # Log detallado para debug
+                    logger.info(f"Comparando con reserva: {reserva}")
+                    
+                    # Limpiar teléfono de la reserva para comparar
+                    tel_reserva = str(reserva.get("telefono", "")).replace("+", "").replace(" ", "")
+                    
+                    # Comparación flexible
                     match = True
-                    if nombre and reserva.get("nombre") != nombre:
-                        match = False
-                    if telefono and reserva.get("telefono") != telefono:
-                        match = False
+                    
+                    # Comparar nombre (ignorar mayúsculas)
+                    if nombre:
+                        nombre_reserva = reserva.get("nombre", "").lower()
+                        if nombre.lower() not in nombre_reserva and nombre_reserva not in nombre.lower():
+                            match = False
+                            logger.info(f"  ❌ Nombre no coincide: '{nombre}' vs '{reserva.get('nombre')}'")
+                    
+                    # Comparar teléfono (flexible)
+                    if telefono_limpio and tel_reserva:
+                        # Comparar los últimos 9 dígitos
+                        tel_limpio_digits = ''.join(filter(str.isdigit, telefono_limpio))[-9:]
+                        tel_reserva_digits = ''.join(filter(str.isdigit, tel_reserva))[-9:]
+                        
+                        if tel_limpio_digits != tel_reserva_digits:
+                            match = False
+                            logger.info(f"  ❌ Teléfono no coincide: '{tel_limpio_digits}' vs '{tel_reserva_digits}'")
+                        else:
+                            logger.info(f"  ✅ Teléfono coincide: {tel_limpio_digits}")
+                    
+                    # Comparar fecha si se proporciona
                     if fecha_antigua and reserva.get("fecha") != fecha_antigua:
                         match = False
+                        logger.info(f"  ❌ Fecha no coincide: '{fecha_antigua}' vs '{reserva.get('fecha')}'")
+                    
+                    # Comparar hora si se proporciona
                     if hora_antigua and reserva.get("hora") != hora_antigua:
                         match = False
-                        
+                        logger.info(f"  ❌ Hora no coincide: '{hora_antigua}' vs '{reserva.get('hora')}'")
+                    
                     if match:
                         id_reserva = reserva.get("id")
+                        logger.info(f"✅ RESERVA ENCONTRADA! ID: {id_reserva}")
                         break
-                        
+                
+                if not id_reserva:
+                    # Mostrar todas las reservas para debug
+                    logger.warning("No se encontró coincidencia. Reservas actuales:")
+                    for r in reservas[:5]:  # Mostrar solo las primeras 5
+                        logger.warning(f"  - {r.get('nombre')} | {r.get('telefono')} | {r.get('fecha')} | {r.get('hora')}")
+            
             if not id_reserva:
                 return {
                     "exito": False,
-                    "mensaje": "No se encontró la reserva a modificar"
+                    "mensaje": "No encuentro tu reserva. ¿Puedes decirme el nombre y fecha de la reserva?"
                 }
         
         # Modificar la reserva
+        logger.info(f"Modificando reserva ID {id_reserva} con cambios: {cambios}")
+        
         result = await self._make_request(
             method="PUT",
             endpoint=f"/modificar-reserva/{id_reserva}",
@@ -227,7 +270,7 @@ class BackendClient:
         )
         
         return result
-    
+        
     async def cancel_reservation(
         self,
         id_reserva: Optional[int] = None,
