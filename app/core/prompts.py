@@ -19,6 +19,7 @@ PRINCIPIOS FUNDAMENTALES:
 2. EFICIENCIA: Pedir solo los datos faltantes, no repetir preguntas.
 3. VERDAD ABSOLUTA: Responder SOLO con datos del backend. Si algo no existe, decir "No consta en el sistema".
 4. CONFIRMACIÓN: Antes de ejecutar crear/modificar/cancelar, resumir y pedir confirmación.
+5. **IDENTIFICACIÓN OBLIGATORIA**: Para modificar o cancelar, SIEMPRE pedir primero el CÓDIGO DE RESERVA.
 
 ESTADO ACTUAL DE LA CONVERSACIÓN:
 - Intent detectado: {conversation_state.get('intent', 'No definido')}
@@ -30,7 +31,7 @@ REGLAS DE INTERACCIÓN:
 1. Tono cercano y profesional (máximo 2-3 frases por respuesta)
 2. Si faltan datos obligatorios, pedirlos de forma natural
 3. Si el usuario cambia algo (ej: "mejor a las 20:00"), actualizar sin repetir todo
-4. Para confirmaciones, enmascarar datos sensibles (teléfono: ***1234)
+4. Para confirmaciones, mostrar código de reserva claramente
 5. Si no hay disponibilidad, ofrecer alternativas automáticamente
 
 FLUJOS PRINCIPALES:
@@ -38,31 +39,53 @@ FLUJOS PRINCIPALES:
 CREAR RESERVA:
 - Necesarios: nombre, teléfono, fecha, hora, comensales
 - Opcionales: zona, alergias, comentarios
-- Proceso: verificar disponibilidad → confirmar datos → crear
+- Proceso: verificar disponibilidad → confirmar datos → crear → PROPORCIONAR CÓDIGO
 
 MODIFICAR RESERVA:
-- Identificar reserva (ID o datos del cliente)
-- Preguntar qué cambiar
+⚠️ REGLA CRÍTICA: SIEMPRE pedir primero el CÓDIGO DE RESERVA
+- Diálogo correcto:
+  Usuario: "Quiero modificar mi reserva"
+  Asistente: "Por favor, proporciona tu código de reserva (lo encuentras en tu confirmación)"
+  Usuario: "ABC123"
+  Asistente: "Perfecto, ¿qué deseas modificar?"
+- NUNCA intentar buscar por nombre/teléfono/fecha
+- Si no tiene código: "Sin el código no puedo modificar tu reserva. ¿Tienes tu confirmación?"
 - Verificar disponibilidad si cambia fecha/hora
 - Confirmar cambios → modificar
 
 CANCELAR RESERVA:
-- Identificar reserva
-- Confirmar cancelación
-- Ejecutar
+⚠️ REGLA CRÍTICA: SIEMPRE pedir primero el CÓDIGO DE RESERVA
+- Diálogo correcto:
+  Usuario: "Quiero cancelar mi reserva"
+  Asistente: "Para cancelar necesito tu código de reserva"
+  Usuario: "XYZ789"
+  Asistente: "¿Confirmas que deseas cancelar la reserva XYZ789?"
+- NUNCA intentar cancelar sin código
+- Si no tiene código: "Necesito el código de tu reserva para cancelarla"
+- Confirmar cancelación → ejecutar
 
 CONSULTAS:
+- Disponibilidad: verificar y mostrar opciones
 - Menú: mostrar categorías y platos con precios
 - Horarios: mostrar horario del día solicitado
 - Políticas: mostrar políticas relevantes
 
 MANEJO DE ERRORES:
 - Si el backend devuelve error, comunicarlo claramente
+- Si no se encuentra reserva con el código: "No encuentro una reserva con ese código. Verifica que esté correcto"
 - Siempre ofrecer alternativas o siguiente paso
 - No inventar información ni excusas
 
-Recuerda: eres eficiente, preciso y mantienes el contexto de la conversación."""
+FORMATO DE CÓDIGOS:
+- Los códigos de reserva son alfanuméricos de 8 caracteres (ej: ABC12345)
+- Siempre mostrarlos en MAYÚSCULAS
+- En confirmaciones, destacarlos: "Tu código de reserva es: **ABC12345**"
 
+Recuerda: 
+- Para modificar/cancelar: CÓDIGO OBLIGATORIO, no buscar por otros datos
+- Mantener contexto de la conversación
+- Ser eficiente y preciso"""
+    
     return prompt
 
 def format_confirmation_message(action: str, data: Dict[str, Any]) -> str:
@@ -74,21 +97,22 @@ def format_confirmation_message(action: str, data: Dict[str, Any]) -> str:
 - Hora: {data.get('hora')}
 - Personas: {data.get('comensales')}
 - Nombre: {data.get('nombre')}
+- Teléfono: {mask_phone(data.get('telefono', ''))}
 - Zona: {data.get('zona', 'Sin preferencia')}
 - Duración: {data.get('duracion_min', settings.DEFAULT_DURATION_MIN)} minutos
 
 ¿Confirmas la reserva?"""
     
     elif action == "modificar":
-        return f"""✏️ Voy a modificar tu reserva con estos cambios:
+        return f"""✏️ Voy a modificar tu reserva {data.get('codigo_reserva', '')} con estos cambios:
 {format_changes(data.get('cambios', {}))}
 
 ¿Confirmo los cambios?"""
     
     elif action == "cancelar":
-        return f"""❌ Voy a cancelar la reserva de {data.get('nombre', 'tu reserva')}.
+        return f"""❌ Voy a cancelar la reserva con código: {data.get('codigo_reserva', '')}
 
-¿Confirmas la cancelación?"""
+¿Confirmas la cancelación? (Esta acción no se puede deshacer)"""
     
     return "¿Confirmas esta acción?"
 
@@ -102,27 +126,71 @@ def format_changes(changes: Dict[str, Any]) -> str:
                 "hora": "• Nueva hora",
                 "comensales": "• Número de personas",
                 "zona": "• Zona",
-                "alergias": "• Alergias"
+                "alergias": "• Alergias",
+                "comentarios": "• Comentarios"
             }.get(key, f"• {key.title()}")
             lines.append(f"{label}: {value}")
     
     return "\n".join(lines) if lines else "Sin cambios especificados"
 
-def format_error_message(error: str) -> str:
+def format_success_message(action: str, result: Dict[str, Any]) -> str:
+    """Formatea mensaje de éxito después de ejecutar acción"""
+    
+    codigo = result.get('codigo_reserva', '')
+    
+    if action == "crear":
+        return f"""✅ ¡Reserva confirmada!
+
+**CÓDIGO DE RESERVA: {codigo}**
+(Guarda este código para modificar o cancelar)
+
+Detalles:
+- Mesa {result.get('mesa', {}).get('numero', 'asignada')}
+- {result.get('fecha')} a las {result.get('hora')}
+- {result.get('personas')} personas
+
+Te esperamos. ¡Gracias por tu reserva!"""
+    
+    elif action == "modificar":
+        return f"""✅ Reserva modificada correctamente
+
+Tu código sigue siendo: **{codigo}**
+
+Nuevos datos confirmados:
+{format_changes(result.get('cambios_realizados', {}))}"""
+    
+    elif action == "cancelar":
+        return f"""✅ Reserva cancelada
+
+La reserva {codigo} ha sido cancelada correctamente.
+Esperamos verte pronto en otra ocasión."""
+    
+    return result.get('mensaje', 'Operación completada correctamente')
+
+def format_error_message(error: str, context: str = None) -> str:
     """Formatea mensaje de error para el usuario"""
     
     error_messages = {
+        "codigo_no_encontrado": "No encuentro una reserva con ese código. Por favor, verifica que esté correcto.",
+        "sin_codigo": "Necesito tu código de reserva para continuar. Lo encuentras en tu confirmación.",
         "timeout": "El sistema está tardando en responder. Por favor, intenta de nuevo en unos momentos.",
         "connection": "No puedo conectar con el sistema. Por favor, intenta más tarde.",
         "not_found": "No encuentro esa información en el sistema.",
         "invalid_data": "Los datos proporcionados no son válidos. Por favor, verifica la información.",
-        "no_availability": "No hay disponibilidad para esa fecha y hora. ¿Te muestro alternativas?"
+        "no_availability": "No hay disponibilidad para esa fecha y hora. ¿Te muestro alternativas?",
+        "invalid_code": "El código de reserva debe tener 8 caracteres. Ejemplo: ABC12345"
     }
     
     # Buscar mensaje personalizado
     for key, message in error_messages.items():
         if key in error.lower():
             return message
+    
+    # Mensaje según contexto
+    if context == "modificar":
+        return "Para modificar tu reserva necesito el código que recibiste al crearla."
+    elif context == "cancelar":
+        return "Para cancelar tu reserva necesito el código de confirmación."
     
     # Mensaje genérico
     return "Ha ocurrido un error. Por favor, intenta de nuevo o contacta con el restaurante."
@@ -138,3 +206,30 @@ def format_alternatives(alternatives: list) -> str:
         lines.append(f"{i}. {alt['hora']} - Mesa para {alt['capacidad']} personas")
     
     return "\n".join(lines)
+
+def mask_phone(phone: str) -> str:
+    """Enmascara el número de teléfono para privacidad"""
+    if len(phone) < 4:
+        return "***"
+    return f"***{phone[-4:]}"
+
+def validate_reservation_code(code: str) -> bool:
+    """Valida el formato del código de reserva"""
+    if not code:
+        return False
+    # Código debe ser alfanumérico de 8 caracteres
+    code = code.strip().upper()
+    return len(code) == 8 and code.isalnum()
+
+def format_request_code_message(action: str) -> str:
+    """Mensaje para solicitar código de reserva"""
+    
+    if action == "modificar":
+        return """Para modificar tu reserva necesito tu código de confirmación.
+Lo encuentras en el mensaje que recibiste al hacer la reserva (8 caracteres, ej: ABC12345)."""
+    
+    elif action == "cancelar":
+        return """Para cancelar necesito tu código de reserva.
+Es un código de 8 caracteres que recibiste al confirmar (ej: XYZ78901)."""
+    
+    return "Por favor, proporciona tu código de reserva (8 caracteres)."

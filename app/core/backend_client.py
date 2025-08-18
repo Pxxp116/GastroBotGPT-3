@@ -1,113 +1,131 @@
+"""
+Cliente para comunicación con el backend de GastroBot
+Versión corregida con manejo obligatorio de códigos de reserva
+"""
+
 import httpx
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime, time
 from app.core.config import settings
-from app.core.logic import generate_alternative_slots
+import re
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 class BackendClient:
-    """Cliente para comunicarse con el backend de GastroBot"""
+    """Cliente para interactuar con el backend de reservas"""
     
     def __init__(self):
-        self.base_url = settings.BACKEND_BASE_URL.rstrip('/')
+        self.base_url = settings.BACKEND_BASE_URL
         self.timeout = settings.BACKEND_TIMEOUT
-        self.retry_attempts = settings.BACKEND_RETRY_ATTEMPTS
+        self.client = httpx.AsyncClient(
+            timeout=httpx.Timeout(self.timeout),
+            follow_redirects=True
+        )
         
+    async def __aenter__(self):
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.client.aclose()
+    
+    def _normalize_phone(self, phone: str) -> str:
+        """Normaliza formato de teléfono para comparaciones"""
+        if not phone:
+            return ""
+        # Eliminar todo excepto dígitos
+        digits = re.sub(r'[^\d]', '', str(phone))
+        # Tomar los últimos 9 dígitos (formato español sin código de país)
+        return digits[-9:] if len(digits) >= 9 else digits
+    
+    def _validate_reservation_code(self, code: str) -> bool:
+        """Valida formato del código de reserva"""
+        if not code:
+            return False
+        code = code.strip().upper()
+        # Código debe ser alfanumérico de 8 caracteres
+        return len(code) == 8 and code.isalnum()
+    
     async def _make_request(
         self,
         method: str,
         endpoint: str,
-        data: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None
+        data: Optional[Dict] = None,
+        params: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """Realiza una petición HTTP al backend con reintentos"""
+        """Realiza una petición HTTP al backend"""
         
         url = f"{self.base_url}{endpoint}"
         
-        async with httpx.AsyncClient() as client:
-            for attempt in range(self.retry_attempts):
-                try:
-                    logger.info(f"Llamando {method} {url} (intento {attempt + 1})")
-                    
-                    response = await client.request(
-                        method=method,
-                        url=url,
-                        json=data,
-                        params=params,
-                        timeout=self.timeout
-                    )
-                    
-                    response.raise_for_status()
-                    return response.json()
-                    
-                except httpx.TimeoutException:
-                    logger.warning(f"Timeout en {url} (intento {attempt + 1})")
-                    if attempt == self.retry_attempts - 1:
-                        return {
-                            "exito": False,
-                            "mensaje": "El sistema está tardando en responder. Por favor, intenta de nuevo."
-                        }
-                        
-                except httpx.HTTPStatusError as e:
-                    logger.error(f"Error HTTP {e.response.status_code} en {url}")
-                    if e.response.status_code >= 500:
-                        if attempt == self.retry_attempts - 1:
-                            return {
-                                "exito": False,
-                                "mensaje": "El sistema está experimentando problemas. Por favor, intenta más tarde."
-                            }
-                    else:
-                        try:
-                            error_data = e.response.json()
-                            return error_data
-                        except:
-                            return {
-                                "exito": False,
-                                "mensaje": f"Error en el servidor: {e.response.status_code}"
-                            }
-                            
-                except Exception as e:
-                    logger.error(f"Error inesperado llamando a {url}: {e}")
-                    if attempt == self.retry_attempts - 1:
-                        return {
-                            "exito": False,
-                            "mensaje": "Ha ocurrido un error inesperado. Por favor, intenta de nuevo."
-                        }
-        
-        return {"exito": False, "mensaje": "No se pudo conectar con el servidor"}
+        try:
+            logger.info(f"Llamando {method} {url} (intento 1)")
+            
+            if data:
+                logger.info(f"Datos enviados: {data}")
+            
+            response = await self.client.request(
+                method=method,
+                url=url,
+                json=data,
+                params=params
+            )
+            
+            logger.info(f"Respuesta recibida: {response.status_code}")
+            
+            if response.status_code >= 400:
+                logger.error(f"Error HTTP {response.status_code}: {response.text}")
+                return {
+                    "exito": False,
+                    "mensaje": f"Error del servidor: {response.status_code}"
+                }
+            
+            result = response.json()
+            
+            # Log del resultado para debug
+            if not result.get("exito"):
+                logger.warning(f"Operación fallida: {result.get('mensaje')}")
+            
+            return result
+            
+        except httpx.TimeoutException:
+            logger.error(f"Timeout llamando a {url}")
+            return {
+                "exito": False,
+                "mensaje": "El servidor tardó demasiado en responder"
+            }
+        except httpx.RequestError as e:
+            logger.error(f"Error de conexión: {e}")
+            return {
+                "exito": False,
+                "mensaje": "Error de conexión con el servidor"
+            }
+        except Exception as e:
+            logger.error(f"Error inesperado: {e}", exc_info=True)
+            return {
+                "exito": False,
+                "mensaje": "Error procesando la solicitud"
+            }
     
     async def check_availability(
         self,
         fecha: str,
         hora: str,
-        comensales: int,
-        duracion_min: int = None
+        comensales: int
     ) -> Dict[str, Any]:
-        """Verifica disponibilidad de mesas"""
+        """Verifica disponibilidad para una fecha y hora"""
         
-        if duracion_min is None:
-            duracion_min = settings.DEFAULT_DURATION_MIN
-            
+        logger.info(f"Verificando disponibilidad: {fecha} {hora} para {comensales} personas")
+        
         result = await self._make_request(
             method="POST",
             endpoint="/buscar-mesa",
             data={
                 "fecha": fecha,
                 "hora": hora,
-                "personas": comensales,
-                "duracion": duracion_min
+                "personas": comensales
             }
         )
         
-        # Si no hay disponibilidad, generar alternativas
-        if not result.get("exito") or not result.get("mesa_disponible"):
-            alternativas = await generate_alternative_slots(
-                fecha, hora, comensales, duracion_min
-            )
-            result["alternativas"] = alternativas
-            
         return result
     
     async def create_reservation(
@@ -119,17 +137,21 @@ class BackendClient:
         comensales: int,
         zona: Optional[str] = None,
         alergias: Optional[str] = None,
-        comentarios: Optional[str] = None
+        comentarios: Optional[str] = None,
+        email: Optional[str] = None
     ) -> Dict[str, Any]:
         """Crea una nueva reserva"""
         
-        # Limpiar el teléfono de WhatsApp
-        telefono_limpio = telefono.replace("whatsapp:", "").replace("+", "")
+        # Limpiar y validar teléfono
+        telefono_limpio = self._normalize_phone(telefono)
+        if len(telefono_limpio) < 9:
+            return {
+                "exito": False,
+                "mensaje": "El número de teléfono no es válido"
+            }
         
-        # Primero buscar mesa disponible
-        availability = await self.check_availability(
-            fecha, hora, comensales, settings.DEFAULT_DURATION_MIN
-        )
+        # Verificar disponibilidad primero
+        availability = await self.check_availability(fecha, hora, comensales)
         
         if not availability.get("exito") or not availability.get("mesa_disponible"):
             return {
@@ -138,28 +160,26 @@ class BackendClient:
                 "alternativas": availability.get("alternativas", [])
             }
         
-        # Asegurar que todos los valores son strings/números válidos
+        # Obtener información de la mesa
         mesa_info = availability["mesa_disponible"]
-        mesa_id = int(mesa_info.get("id", 1))  # Asegurar que es entero
+        mesa_id = int(mesa_info.get("id", 1))
         
         # Crear la reserva con valores seguros
         data = {
             "nombre": str(nombre),
             "telefono": str(telefono_limpio),
-            "email": "",  # String vacío, no None
+            "email": str(email) if email else "",
             "fecha": str(fecha),
             "hora": str(hora),
-            "personas": int(comensales),  # Asegurar que es entero
-            "mesa_id": mesa_id,  # Asegurar que es entero
-            "duracion": int(settings.DEFAULT_DURATION_MIN),  # Asegurar que es entero
-            "notas": str(comentarios) if comentarios else "",  # Convertir None a ""
-            "alergias": str(alergias) if alergias else "",  # Convertir None a ""
-            "zona_preferida": str(zona) if zona else ""  # Convertir None a ""
+            "personas": int(comensales),
+            "mesa_id": mesa_id,
+            "duracion": int(settings.DEFAULT_DURATION_MIN),
+            "notas": str(comentarios) if comentarios else "",
+            "alergias": str(alergias) if alergias else "",
+            "zona_preferida": str(zona) if zona else ""
         }
         
-        # Log para debug
-        logger.info(f"Enviando datos de reserva: {data}")
-        logger.info(f"Tipos de datos: {[(k, type(v).__name__) for k, v in data.items()]}")
+        logger.info(f"Creando reserva con datos: {data}")
         
         result = await self._make_request(
             method="POST",
@@ -167,18 +187,25 @@ class BackendClient:
             data=data
         )
         
+        # Si la creación fue exitosa, asegurar que incluye el código
+        if result.get("exito") and result.get("reserva"):
+            if not result.get("codigo_reserva"):
+                result["codigo_reserva"] = result["reserva"].get("codigo_reserva", "")
+            
+            logger.info(f"Reserva creada con código: {result.get('codigo_reserva')}")
+        
         return result
     
     async def modify_reservation(
         self,
+        codigo_reserva: Optional[str] = None,
         id_reserva: Optional[int] = None,
-        nombre: Optional[str] = None,
-        telefono: Optional[str] = None,
-        fecha_antigua: Optional[str] = None,
-        hora_antigua: Optional[str] = None,
         cambios: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        """Modifica una reserva existente"""
+        """
+        Modifica una reserva existente
+        REQUIERE código de reserva o ID
+        """
         
         if not cambios:
             return {
@@ -186,140 +213,149 @@ class BackendClient:
                 "mensaje": "No se especificaron cambios"
             }
         
-        # Limpiar teléfono
-        if telefono:
-            telefono_limpio = telefono.replace("whatsapp:", "").replace("+", "").replace(" ", "")
-        else:
-            telefono_limpio = None
+        # Validar que tenemos identificador
+        if not codigo_reserva and not id_reserva:
+            return {
+                "exito": False,
+                "mensaje": "📋 Para modificar tu reserva necesito tu código de confirmación.\n" +
+                         "Lo encuentras en el mensaje que recibiste al hacer la reserva (8 caracteres).",
+                "requiere_codigo": True
+            }
         
-        # Si no tenemos ID, buscar la reserva
-        if not id_reserva:
-            espejo = await self._make_request(
-                method="GET",
-                endpoint="/espejo"
-            )
-            
-            if espejo.get("exito"):
-                reservas = espejo.get("espejo", {}).get("reservas", [])
-                logger.info(f"📋 Total reservas en sistema: {len(reservas)}")
-                
-                # Buscar por coincidencia
-                for reserva in reservas:
-                    # Log detallado para debug
-                    logger.info(f"Comparando con reserva: {reserva}")
-                    
-                    # Limpiar teléfono de la reserva para comparar
-                    tel_reserva = str(reserva.get("telefono", "")).replace("+", "").replace(" ", "")
-                    
-                    # Comparación flexible
-                    match = True
-                    
-                    # Comparar nombre (ignorar mayúsculas)
-                    if nombre:
-                        nombre_reserva = reserva.get("nombre", "").lower()
-                        if nombre.lower() not in nombre_reserva and nombre_reserva not in nombre.lower():
-                            match = False
-                            logger.info(f"  ❌ Nombre no coincide: '{nombre}' vs '{reserva.get('nombre')}'")
-                    
-                    # Comparar teléfono (flexible)
-                    if telefono_limpio and tel_reserva:
-                        # Comparar los últimos 9 dígitos
-                        tel_limpio_digits = ''.join(filter(str.isdigit, telefono_limpio))[-9:]
-                        tel_reserva_digits = ''.join(filter(str.isdigit, tel_reserva))[-9:]
-                        
-                        if tel_limpio_digits != tel_reserva_digits:
-                            match = False
-                            logger.info(f"  ❌ Teléfono no coincide: '{tel_limpio_digits}' vs '{tel_reserva_digits}'")
-                        else:
-                            logger.info(f"  ✅ Teléfono coincide: {tel_limpio_digits}")
-                    
-                    # Comparar fecha si se proporciona
-                    if fecha_antigua and reserva.get("fecha") != fecha_antigua:
-                        match = False
-                        logger.info(f"  ❌ Fecha no coincide: '{fecha_antigua}' vs '{reserva.get('fecha')}'")
-                    
-                    # Comparar hora si se proporciona
-                    if hora_antigua and reserva.get("hora") != hora_antigua:
-                        match = False
-                        logger.info(f"  ❌ Hora no coincide: '{hora_antigua}' vs '{reserva.get('hora')}'")
-                    
-                    if match:
-                        id_reserva = reserva.get("id")
-                        logger.info(f"✅ RESERVA ENCONTRADA! ID: {id_reserva}")
-                        break
-                
-                if not id_reserva:
-                    # Mostrar todas las reservas para debug
-                    logger.warning("No se encontró coincidencia. Reservas actuales:")
-                    for r in reservas[:5]:  # Mostrar solo las primeras 5
-                        logger.warning(f"  - {r.get('nombre')} | {r.get('telefono')} | {r.get('fecha')} | {r.get('hora')}")
-            
-            if not id_reserva:
+        # Si tenemos código, validarlo
+        if codigo_reserva:
+            if not self._validate_reservation_code(codigo_reserva):
                 return {
                     "exito": False,
-                    "mensaje": "No encuentro tu reserva. ¿Puedes decirme el nombre y fecha de la reserva?"
+                    "mensaje": "❌ El código de reserva no es válido. Debe tener 8 caracteres (ej: ABC12345).",
+                    "codigo_invalido": True
                 }
+            
+            codigo_reserva = codigo_reserva.strip().upper()
+            
+            # Llamar al endpoint con código
+            logger.info(f"Modificando reserva con código: {codigo_reserva}")
+            
+            result = await self._make_request(
+                method="PUT",
+                endpoint="/modificar-reserva",
+                data={
+                    "codigo_reserva": codigo_reserva,
+                    **cambios
+                }
+            )
+            
+        elif id_reserva:
+            # Si tenemos ID numérico (para compatibilidad)
+            logger.info(f"Modificando reserva con ID: {id_reserva}")
+            
+            result = await self._make_request(
+                method="PUT",
+                endpoint=f"/modificar-reserva/{id_reserva}",
+                data=cambios
+            )
         
-        # Modificar la reserva
-        logger.info(f"Modificando reserva ID {id_reserva} con cambios: {cambios}")
-        
-        result = await self._make_request(
-            method="PUT",
-            endpoint=f"/modificar-reserva/{id_reserva}",
-            data=cambios
-        )
+        # Manejar error de código no encontrado
+        if not result.get("exito") and "no encontr" in result.get("mensaje", "").lower():
+            result["mensaje"] = "❌ No encuentro una reserva con ese código. Por favor, verifica que esté correcto."
+            result["codigo_no_encontrado"] = True
         
         return result
-        
+    
     async def cancel_reservation(
         self,
+        codigo_reserva: Optional[str] = None,
         id_reserva: Optional[int] = None,
-        nombre: Optional[str] = None,
-        telefono: Optional[str] = None,
-        fecha: Optional[str] = None,
-        hora: Optional[str] = None,
         motivo: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Cancela una reserva"""
+        """
+        Cancela una reserva
+        REQUIERE código de reserva o ID
+        """
         
-        # Si no tenemos ID, buscar la reserva
-        if not id_reserva:
-            espejo = await self._make_request(
-                method="GET",
-                endpoint="/espejo"
-            )
-            
-            if espejo.get("exito"):
-                reservas = espejo.get("espejo", {}).get("reservas", [])
-                
-                for reserva in reservas:
-                    match = True
-                    if nombre and reserva.get("nombre") != nombre:
-                        match = False
-                    if telefono and reserva.get("telefono") != telefono:
-                        match = False
-                    if fecha and reserva.get("fecha") != fecha:
-                        match = False
-                    if hora and reserva.get("hora") != hora:
-                        match = False
-                        
-                    if match:
-                        id_reserva = reserva.get("id")
-                        break
-                        
-            if not id_reserva:
+        # Validar que tenemos identificador
+        if not codigo_reserva and not id_reserva:
+            return {
+                "exito": False,
+                "mensaje": "🔍 Para cancelar necesito tu código de reserva.\n" +
+                         "Es un código de 8 caracteres que recibiste al confirmar (ej: XYZ78901).",
+                "requiere_codigo": True
+            }
+        
+        # Si tenemos código, validarlo
+        if codigo_reserva:
+            if not self._validate_reservation_code(codigo_reserva):
                 return {
                     "exito": False,
-                    "mensaje": "No se encontró la reserva a cancelar"
+                    "mensaje": "❌ El código de reserva no es válido. Debe tener 8 caracteres alfanuméricos.",
+                    "codigo_invalido": True
                 }
+            
+            codigo_reserva = codigo_reserva.strip().upper()
+            
+            # Llamar al endpoint con código
+            logger.info(f"Cancelando reserva con código: {codigo_reserva}")
+            
+            result = await self._make_request(
+                method="DELETE",
+                endpoint="/cancelar-reserva",
+                data={
+                    "codigo_reserva": codigo_reserva,
+                    "motivo": motivo or "Cancelado por el cliente"
+                }
+            )
+            
+        elif id_reserva:
+            # Si tenemos ID numérico (para compatibilidad)
+            logger.info(f"Cancelando reserva con ID: {id_reserva}")
+            
+            result = await self._make_request(
+                method="DELETE",
+                endpoint=f"/cancelar-reserva/{id_reserva}",
+                data={"motivo": motivo or "Cancelado por el cliente"}
+            )
         
-        result = await self._make_request(
-            method="DELETE",
-            endpoint=f"/cancelar-reserva/{id_reserva}",
-            data={"motivo": motivo or "Cancelado por el cliente"}
-        )
+        # Manejar error de código no encontrado
+        if not result.get("exito") and "no encontr" in result.get("mensaje", "").lower():
+            result["mensaje"] = "❌ No encuentro una reserva con ese código. Puede que ya esté cancelada."
+            result["codigo_no_encontrado"] = True
         
         return result
+    
+    async def get_reservation_by_code(
+        self,
+        codigo_reserva: str
+    ) -> Dict[str, Any]:
+        """Busca una reserva por su código"""
+        
+        if not self._validate_reservation_code(codigo_reserva):
+            return {
+                "exito": False,
+                "mensaje": "Código de reserva inválido"
+            }
+        
+        codigo_reserva = codigo_reserva.strip().upper()
+        
+        # Obtener el espejo y buscar
+        espejo = await self._make_request(
+            method="GET",
+            endpoint="/espejo"
+        )
+        
+        if espejo.get("exito"):
+            reservas = espejo.get("espejo", {}).get("reservas", [])
+            
+            for reserva in reservas:
+                if reserva.get("codigo_reserva", "").upper() == codigo_reserva:
+                    return {
+                        "exito": True,
+                        "reserva": reserva
+                    }
+        
+        return {
+            "exito": False,
+            "mensaje": "No se encontró la reserva con ese código"
+        }
     
     async def get_menu(self, categoria: Optional[str] = None) -> Dict[str, Any]:
         """Obtiene el menú del restaurante"""
@@ -339,12 +375,12 @@ class BackendClient:
                 if cat.get("nombre", "").lower() == categoria.lower():
                     categoria_filtrada = cat
                     break
-                    
+            
             if categoria_filtrada:
                 result["menu"] = {"categorias": [categoria_filtrada]}
             else:
                 result["mensaje"] = f"No se encontró la categoría '{categoria}'"
-                
+        
         return result
     
     async def get_hours(self, fecha: Optional[str] = None) -> Dict[str, Any]:
@@ -353,7 +389,7 @@ class BackendClient:
         params = {}
         if fecha:
             params["fecha"] = fecha
-            
+        
         result = await self._make_request(
             method="GET",
             endpoint="/consultar-horario",
@@ -377,11 +413,39 @@ class BackendClient:
                 "exito": True,
                 "politicas": politicas
             }
-            
+        
         return {
             "exito": False,
             "mensaje": "No se pudieron obtener las políticas"
         }
+    
+    async def get_mirror(self) -> Dict[str, Any]:
+        """Obtiene el archivo espejo completo"""
+        
+        result = await self._make_request(
+            method="GET",
+            endpoint="/espejo"
+        )
+        
+        if result.get("exito"):
+            espejo = result.get("espejo", {})
+            
+            # Verificar frescura (máximo 30 segundos)
+            if "ultima_actualizacion" in espejo:
+                try:
+                    ultima = datetime.fromisoformat(espejo["ultima_actualizacion"])
+                    ahora = datetime.now()
+                    antiguedad = (ahora - ultima).total_seconds()
+                    
+                    if antiguedad > 30:
+                        logger.warning(f"Espejo desactualizado: {antiguedad} segundos")
+                        result["advertencia"] = "Datos potencialmente desactualizados"
+                        result["antiguedad_segundos"] = antiguedad
+                        
+                except Exception as e:
+                    logger.error(f"Error verificando frescura: {e}")
+        
+        return result
 
 # Instancia global
 backend_client = BackendClient()
