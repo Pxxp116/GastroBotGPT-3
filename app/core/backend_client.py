@@ -123,6 +123,9 @@ class BackendClient:
     ) -> Dict[str, Any]:
         """Crea una nueva reserva"""
         
+        # Limpiar el teléfono de WhatsApp
+        telefono_limpio = telefono.replace("whatsapp:", "").replace("+", "")
+        
         # Primero buscar mesa disponible
         availability = await self.check_availability(
             fecha, hora, comensales, settings.DEFAULT_DURATION_MIN
@@ -135,30 +138,34 @@ class BackendClient:
                 "alternativas": availability.get("alternativas", [])
             }
         
-        # Crear la reserva con el formato correcto
+        # Asegurar que todos los valores son strings/números válidos
+        mesa_info = availability["mesa_disponible"]
+        mesa_id = int(mesa_info.get("id", 1))  # Asegurar que es entero
+        
+        # Crear la reserva con valores seguros
         data = {
-            "nombre": nombre,
-            "telefono": telefono,
-            "email": "",  # Email vacío si no lo tenemos
-            "fecha": fecha,
-            "hora": hora,
-            "personas": comensales,  # ← CAMBIO: usar "personas" no "comensales"
-            "mesa_id": availability["mesa_disponible"]["id"],
-            "duracion": settings.DEFAULT_DURATION_MIN,
-            "notas": comentarios or "",
-            "alergias": alergias or "",
-            "zona_preferida": zona or ""
+            "nombre": str(nombre),
+            "telefono": str(telefono_limpio),
+            "email": "",  # String vacío, no None
+            "fecha": str(fecha),
+            "hora": str(hora),
+            "personas": int(comensales),  # Asegurar que es entero
+            "mesa_id": mesa_id,  # Asegurar que es entero
+            "duracion": int(settings.DEFAULT_DURATION_MIN),  # Asegurar que es entero
+            "notas": str(comentarios) if comentarios else "",  # Convertir None a ""
+            "alergias": str(alergias) if alergias else "",  # Convertir None a ""
+            "zona_preferida": str(zona) if zona else ""  # Convertir None a ""
         }
         
+        # Log para debug
         logger.info(f"Enviando datos de reserva: {data}")
+        logger.info(f"Tipos de datos: {[(k, type(v).__name__) for k, v in data.items()]}")
         
         result = await self._make_request(
             method="POST",
             endpoint="/crear-reserva",
             data=data
         )
-        
-        logger.info(f"Respuesta del backend: {result}")
         
         return result
     
