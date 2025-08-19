@@ -24,7 +24,7 @@ class OpenAIOrchestrator:
         """
         try:
             # Construir mensajes para OpenAI
-            messages = self._build_messages(
+            messages = await self._build_messages(
                 user_message, 
                 conversation_state, 
                 conversation_history
@@ -86,7 +86,7 @@ class OpenAIOrchestrator:
                 "action": None
             }
     
-    def _build_messages(
+    async def _build_messages(
         self,
         user_message: str,
         conversation_state: Dict[str, Any],
@@ -95,10 +95,12 @@ class OpenAIOrchestrator:
         """Construye el array de mensajes para OpenAI"""
         messages = []
         
-        # System prompt
+        # System prompt con duración dinámica
+        from app.core.backend_client import backend_client
+        system_prompt = await get_system_prompt(conversation_state, backend_client)
         messages.append({
             "role": "system",
-            "content": get_system_prompt(conversation_state)
+            "content": system_prompt
         })
         
         # Historial relevante (últimos N mensajes)

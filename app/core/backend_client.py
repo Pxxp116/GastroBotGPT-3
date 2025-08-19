@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Cache global para la duración - MUY AGRESIVO
 _duration_cache = {
     "value": 120,  # FORZAR 120 MINUTOS INMEDIATAMENTE
-    "timestamp": datetime.now(),
+    "timestamp": datetime.now() - timedelta(hours=2),  # Forzar que esté expirado
     "ttl_minutes": 60  # Cache por 1 hora para ser agresivo
 }
 

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     BACKEND_RETRY_ATTEMPTS: int = 3
     
     # Reservas
-    DEFAULT_DURATION_MIN: int = 90
+    DEFAULT_DURATION_MIN: int = 120  # Actualizado para coincidir con el backend
     MAX_DURATION_MIN: int = 180
     MIN_DURATION_MIN: int = 60
     

@@ -2,16 +2,24 @@ from typing import Dict, Any
 from datetime import datetime
 from app.core.config import settings
 
-def get_system_prompt(conversation_state: Dict[str, Any]) -> str:
+async def get_system_prompt(conversation_state: Dict[str, Any], backend_client=None) -> str:
     """Genera el prompt del sistema basado en el estado actual"""
     
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+    
+    # Obtener duración dinámica del backend si está disponible
+    duration_min = settings.DEFAULT_DURATION_MIN  # Fallback
+    if backend_client:
+        try:
+            duration_min = await backend_client.get_duration_from_policies(force_refresh=True)
+        except Exception:
+            pass  # Use fallback
     
     prompt = f"""Eres un asistente de reservas para GastroBot, un sistema profesional de gestión de reservas de restaurante.
 
 INFORMACIÓN DEL SISTEMA:
 - Fecha y hora actual: {current_time}
-- Duración estándar de reserva: {settings.DEFAULT_DURATION_MIN} minutos
+- Duración estándar de reserva: {duration_min} minutos
 - Zona horaria: {settings.TIMEZONE}
 
 PRINCIPIOS FUNDAMENTALES:
@@ -98,10 +106,18 @@ Recuerda:
     
     return prompt
 
-def format_confirmation_message(action: str, data: Dict[str, Any]) -> str:
+async def format_confirmation_message(action: str, data: Dict[str, Any], backend_client=None) -> str:
     """Formatea mensaje de confirmación antes de ejecutar acción"""
     
     if action == "crear":
+        # Obtener duración dinámica del backend si está disponible
+        duration_min = settings.DEFAULT_DURATION_MIN  # Fallback
+        if backend_client:
+            try:
+                duration_min = await backend_client.get_duration_from_policies(force_refresh=True)
+            except Exception:
+                pass  # Use fallback
+        
         return f"""📝 Confirmo estos datos para tu reserva:
 - Fecha: {data.get('fecha')}
 - Hora: {data.get('hora')}
@@ -109,7 +125,7 @@ def format_confirmation_message(action: str, data: Dict[str, Any]) -> str:
 - Nombre: {data.get('nombre')}
 - Teléfono: {mask_phone(data.get('telefono', ''))}
 - Zona: {data.get('zona', 'Sin preferencia')}
-- Duración: {data.get('duracion_min', settings.DEFAULT_DURATION_MIN)} minutos
+- Duración: {data.get('duracion_min', duration_min)} minutos
 
 ¿Confirmas la reserva?"""
     

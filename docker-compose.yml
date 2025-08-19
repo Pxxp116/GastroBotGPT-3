@@ -11,7 +11,7 @@ services:
       - BACKEND_BASE_URL=${BACKEND_BASE_URL}
       - REDIS_URL=redis://redis:6379/0
       - TIMEZONE=${TIMEZONE:-Europe/Madrid}
-      - DEFAULT_DURATION_MIN=${DEFAULT_DURATION_MIN:-90}
+      - DEFAULT_DURATION_MIN=${DEFAULT_DURATION_MIN:-120}
     env_file:
       - .env
     volumes:

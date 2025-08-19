@@ -38,7 +38,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                         "duracion_min": {
                             "type": "integer",
                             "description": "Duración estimada en minutos",
-                            "default": 90
+                            "default": 120
                         }
                     },
                     "required": ["fecha", "hora", "comensales"],
