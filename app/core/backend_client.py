@@ -154,9 +154,31 @@ class BackendClient:
         availability = await self.check_availability(fecha, hora, comensales)
         
         if not availability.get("exito") or not availability.get("mesa_disponible"):
+            # Si hay sugerencia de horario, usar esa información
+            if availability.get("sugerencia") or availability.get("alternativa"):
+                sugerencia = availability.get("sugerencia") or availability.get("alternativa")
+                mensaje = availability.get("mensaje", "No hay disponibilidad para esa hora")
+                
+                if sugerencia and sugerencia.get("hora"):
+                    mensaje += f". Te sugiero la hora {sugerencia['hora']}"
+                    if sugerencia.get("mensaje"):
+                        mensaje += f" ({sugerencia['mensaje']})"
+                
+                return {
+                    "exito": False,
+                    "mensaje": mensaje,
+                    "sugerencia": sugerencia,
+                    "alternativas": availability.get("alternativas", []),
+                    "horario_rechazado": {
+                        "fecha": fecha,
+                        "hora": hora,
+                        "motivo": availability.get("mensaje", "Fuera de horario")
+                    }
+                }
+            
             return {
                 "exito": False,
-                "mensaje": "No hay mesas disponibles para esa hora",
+                "mensaje": availability.get("mensaje", "No hay mesas disponibles para esa hora"),
                 "alternativas": availability.get("alternativas", [])
             }
         
