@@ -106,6 +106,25 @@ class BackendClient:
                 "mensaje": "Error procesando la solicitud"
             }
     
+    async def get_duration_from_policies(self) -> int:
+        """Obtiene la duración de reserva desde las políticas del backend"""
+        try:
+            result = await self._make_request(
+                method="GET",
+                endpoint="/admin/politicas"
+            )
+            
+            if result.get("exito") and result.get("politicas"):
+                return (result["politicas"].get("tiempo_mesa_minutos") or 
+                       result["politicas"].get("duracion_estandar_min") or
+                       settings.DEFAULT_DURATION_MIN)
+            
+            return settings.DEFAULT_DURATION_MIN
+            
+        except Exception as e:
+            logger.warning(f"Error obteniendo duración desde backend, usando default: {e}")
+            return settings.DEFAULT_DURATION_MIN
+
     async def check_availability(
         self,
         fecha: str,
@@ -116,13 +135,17 @@ class BackendClient:
         
         logger.info(f"Verificando disponibilidad: {fecha} {hora} para {comensales} personas")
         
+        # Obtener duración dinámica del backend
+        duracion = await self.get_duration_from_policies()
+        
         result = await self._make_request(
             method="POST",
             endpoint="/buscar-mesa",
             data={
                 "fecha": fecha,
                 "hora": hora,
-                "personas": comensales
+                "personas": comensales,
+                "duracion": duracion
             }
         )
         
@@ -186,6 +209,9 @@ class BackendClient:
         mesa_info = availability["mesa_disponible"]
         mesa_id = int(mesa_info.get("id", 1))
         
+        # Obtener duración dinámica del backend
+        duracion = await self.get_duration_from_policies()
+        
         # Crear la reserva con valores seguros
         data = {
             "nombre": str(nombre),
@@ -195,7 +221,7 @@ class BackendClient:
             "hora": str(hora),
             "personas": int(comensales),
             "mesa_id": mesa_id,
-            "duracion": int(settings.DEFAULT_DURATION_MIN),
+            "duracion": int(duracion),
             "notas": str(comentarios) if comentarios else "",
             "alergias": str(alergias) if alergias else "",
             "zona_preferida": str(zona) if zona else ""
