@@ -109,16 +109,20 @@ class BackendClient:
     async def get_duration_from_policies(self) -> int:
         """Obtiene la duración de reserva desde las políticas del backend"""
         try:
+            logger.info("Obteniendo duración dinámica desde políticas del backend")
             result = await self._make_request(
                 method="GET",
                 endpoint="/admin/politicas"
             )
             
             if result.get("exito") and result.get("politicas"):
-                return (result["politicas"].get("tiempo_mesa_minutos") or 
-                       result["politicas"].get("duracion_estandar_min") or
-                       settings.DEFAULT_DURATION_MIN)
+                duracion = (result["politicas"].get("tiempo_mesa_minutos") or 
+                           result["politicas"].get("duracion_estandar_min") or
+                           settings.DEFAULT_DURATION_MIN)
+                logger.info(f"Duración obtenida del backend: {duracion} minutos")
+                return duracion
             
+            logger.warning("No se pudieron obtener políticas del backend, usando default")
             return settings.DEFAULT_DURATION_MIN
             
         except Exception as e:
