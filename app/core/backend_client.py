@@ -8,9 +8,16 @@ import logging
 from typing import Dict, Any, Optional
 from app.core.config import settings
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+
+# Cache global para la duración - MUY AGRESIVO
+_duration_cache = {
+    "value": 120,  # FORZAR 120 MINUTOS INMEDIATAMENTE
+    "timestamp": datetime.now(),
+    "ttl_minutes": 60  # Cache por 1 hora para ser agresivo
+}
 
 class BackendClient:
     """Cliente para interactuar con el backend de reservas"""
@@ -107,9 +114,20 @@ class BackendClient:
             }
     
     async def get_duration_from_policies(self) -> int:
-        """Obtiene la duración de reserva desde las políticas del backend"""
+        """Obtiene la duración de reserva con cache agresivo"""
+        global _duration_cache
+        
+        # Verificar si el cache es válido
+        now = datetime.now()
+        if (_duration_cache["value"] and 
+            _duration_cache["timestamp"] and 
+            (now - _duration_cache["timestamp"]).total_seconds() < (_duration_cache["ttl_minutes"] * 60)):
+            logger.info(f"Usando duración desde cache: {_duration_cache['value']} minutos")
+            return _duration_cache["value"]
+        
+        # Solo actualizar cache si es muy viejo
         try:
-            logger.info("Obteniendo duración dinámica desde políticas del backend")
+            logger.info("Cache expirado, obteniendo duración desde backend")
             result = await self._make_request(
                 method="GET",
                 endpoint="/admin/politicas"
@@ -118,16 +136,21 @@ class BackendClient:
             if result.get("exito") and result.get("politicas"):
                 duracion = (result["politicas"].get("tiempo_mesa_minutos") or 
                            result["politicas"].get("duracion_estandar_min") or
-                           settings.DEFAULT_DURATION_MIN)
-                logger.info(f"Duración obtenida del backend: {duracion} minutos")
+                           120)  # Default a 120 no 90
+                
+                # Actualizar cache
+                _duration_cache["value"] = duracion
+                _duration_cache["timestamp"] = now
+                
+                logger.info(f"Duración actualizada en cache: {duracion} minutos")
                 return duracion
             
-            logger.warning("No se pudieron obtener políticas del backend, usando default")
-            return settings.DEFAULT_DURATION_MIN
+            logger.warning("No se pudieron obtener políticas, usando cache o default")
+            return _duration_cache["value"] or 120
             
         except Exception as e:
-            logger.warning(f"Error obteniendo duración desde backend, usando default: {e}")
-            return settings.DEFAULT_DURATION_MIN
+            logger.warning(f"Error obteniendo duración, usando cache o default: {e}")
+            return _duration_cache["value"] or 120
 
     async def check_availability(
         self,
