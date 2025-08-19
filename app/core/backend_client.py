@@ -113,21 +113,29 @@ class BackendClient:
                 "mensaje": "Error procesando la solicitud"
             }
     
-    async def get_duration_from_policies(self) -> int:
-        """Obtiene la duración de reserva con cache agresivo"""
+    async def get_duration_from_policies(self, force_refresh: bool = False) -> int:
+        """
+        Obtiene la duración de reserva con cache agresivo
+        
+        Args:
+            force_refresh: Si True, fuerza actualización del cache ignorando TTL
+        """
         global _duration_cache
         
-        # Verificar si el cache es válido
+        # Verificar si el cache es válido Y no se fuerza refresh
         now = datetime.now()
-        if (_duration_cache["value"] and 
+        if (not force_refresh and _duration_cache["value"] and 
             _duration_cache["timestamp"] and 
             (now - _duration_cache["timestamp"]).total_seconds() < (_duration_cache["ttl_minutes"] * 60)):
             logger.info(f"Usando duración desde cache: {_duration_cache['value']} minutos")
             return _duration_cache["value"]
         
-        # Solo actualizar cache si es muy viejo
+        # Actualizar cache cuando sea viejo o se fuerce
         try:
-            logger.info("Cache expirado, obteniendo duración desde backend")
+            if force_refresh:
+                logger.info("Forzando actualización de duración desde backend")
+            else:
+                logger.info("Cache expirado, obteniendo duración desde backend")
             result = await self._make_request(
                 method="GET",
                 endpoint="/admin/politicas"
@@ -151,6 +159,59 @@ class BackendClient:
         except Exception as e:
             logger.warning(f"Error obteniendo duración, usando cache o default: {e}")
             return _duration_cache["value"] or 120
+    
+    def invalidate_duration_cache(self):
+        """Invalida el cache de duración forzando una actualización en la próxima consulta"""
+        global _duration_cache
+        _duration_cache["timestamp"] = datetime.now() - timedelta(hours=2)  # Forzar expiración
+        logger.info("Cache de duración invalidado")
+    
+    async def get_fresh_restaurant_hours(self, fecha: str) -> Dict[str, Any]:
+        """
+        Obtiene horarios frescos del restaurante para una fecha específica
+        Usado para generar sugerencias con datos actualizados
+        """
+        try:
+            result = await self._make_request(
+                method="GET",
+                endpoint="/admin/horarios"
+            )
+            
+            if result.get("exito") and result.get("horarios"):
+                # Encontrar horario para la fecha específica
+                fecha_dt = datetime.strptime(fecha, "%Y-%m-%d")
+                dia_semana = fecha_dt.weekday()  # 0=Lunes, 6=Domingo
+                
+                # Mapear días de la semana
+                dias_map = {0: 'lunes', 1: 'martes', 2: 'miercoles', 3: 'jueves', 
+                           4: 'viernes', 5: 'sabado', 6: 'domingo'}
+                dia_nombre = dias_map.get(dia_semana, 'lunes')
+                
+                horarios = result["horarios"]
+                dia_horario = None
+                
+                # Buscar horario específico del día
+                for horario in horarios:
+                    if horario.get("dia_semana", "").lower() == dia_nombre:
+                        dia_horario = horario
+                        break
+                
+                if dia_horario and not dia_horario.get("cerrado", False):
+                    return {
+                        "apertura": dia_horario.get("hora_apertura", "13:00"),
+                        "cierre": dia_horario.get("hora_cierre", "23:00"),
+                        "cerrado": False
+                    }
+                else:
+                    return {"cerrado": True}
+            
+            # Fallback a horarios por defecto si no hay datos
+            return {"apertura": "13:00", "cierre": "23:00", "cerrado": False}
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo horarios frescos: {e}")
+            # Fallback a horarios por defecto
+            return {"apertura": "13:00", "cierre": "23:00", "cerrado": False}
 
     async def check_availability(
         self,
@@ -162,8 +223,8 @@ class BackendClient:
         
         logger.info(f"Verificando disponibilidad: {fecha} {hora} para {comensales} personas")
         
-        # Obtener duración dinámica del backend
-        duracion = await self.get_duration_from_policies()
+        # Obtener duración dinámica del backend (forzar actualización para sugerencias precisas)
+        duracion = await self.get_duration_from_policies(force_refresh=True)
         
         result = await self._make_request(
             method="POST",
@@ -204,6 +265,12 @@ class BackendClient:
         availability = await self.check_availability(fecha, hora, comensales)
         
         if not availability.get("exito") or not availability.get("mesa_disponible"):
+            # Invalidar cache si el horario fue rechazado (podría indicar datos obsoletos)
+            motivo = availability.get("mensaje", "")
+            if "duración" in motivo.lower() or "terminaría después" in motivo.lower():
+                logger.info("Invalidando cache por posible incompatibilidad de duración")
+                self.invalidate_duration_cache()
+            
             # Si hay sugerencia de horario, usar esa información
             if availability.get("sugerencia") or availability.get("alternativa"):
                 sugerencia = availability.get("sugerencia") or availability.get("alternativa")
@@ -236,8 +303,8 @@ class BackendClient:
         mesa_info = availability["mesa_disponible"]
         mesa_id = int(mesa_info.get("id", 1))
         
-        # Obtener duración dinámica del backend
-        duracion = await self.get_duration_from_policies()
+        # Obtener duración dinámica del backend (forzar actualización para datos precisos)
+        duracion = await self.get_duration_from_policies(force_refresh=True)
         
         # Crear la reserva con valores seguros
         data = {

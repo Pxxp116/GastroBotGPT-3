@@ -9,13 +9,24 @@ async def generate_alternative_slots(
     fecha: str,
     hora: str,
     comensales: int,
-    duracion_min: int
+    backend_client
 ) -> List[Dict[str, Any]]:
-    """Genera slots alternativos cuando no hay disponibilidad"""
+    """
+    Genera slots alternativos cuando no hay disponibilidad
+    Usa datos frescos del Dashboard para horarios y duración
+    """
     
     alternatives = []
     
     try:
+        # Obtener datos frescos del backend
+        duracion_min = await backend_client.get_duration_from_policies(force_refresh=True)
+        horarios = await backend_client.get_fresh_restaurant_hours(fecha)
+        
+        if horarios.get("cerrado", False):
+            logger.info(f"Restaurante cerrado en {fecha}")
+            return alternatives
+        
         # Parsear fecha y hora
         fecha_obj = datetime.strptime(fecha, "%Y-%m-%d")
         hora_obj = datetime.strptime(hora, "%H:%M").time()
@@ -27,9 +38,9 @@ async def generate_alternative_slots(
             # Calcular nueva hora
             new_datetime = datetime.combine(fecha_obj, hora_obj) + timedelta(minutes=offset)
             
-            # Validar horario de apertura (ejemplo: 13:00 - 16:00 y 20:00 - 23:00)
+            # Validar horario usando datos frescos del backend
             new_time = new_datetime.time()
-            if is_valid_restaurant_time(new_time):
+            if is_valid_restaurant_time_dynamic(new_time, horarios, duracion_min):
                 alternatives.append({
                     "fecha": new_datetime.strftime("%Y-%m-%d"),
                     "hora": new_datetime.strftime("%H:%M"),
@@ -43,8 +54,42 @@ async def generate_alternative_slots(
     
     return alternatives[:3]  # Máximo 3 alternativas
 
+def is_valid_restaurant_time_dynamic(check_time: time, horarios: Dict[str, Any], duracion_min: int) -> bool:
+    """
+    Verifica si una hora está dentro del horario del restaurante usando datos frescos
+    También valida que la reserva no termine después del cierre
+    """
+    
+    if horarios.get("cerrado", False):
+        return False
+    
+    try:
+        # Obtener horarios del backend
+        apertura_str = horarios.get("apertura", "13:00")
+        cierre_str = horarios.get("cierre", "23:00")
+        
+        # Parsear horarios
+        apertura = datetime.strptime(apertura_str, "%H:%M").time()
+        cierre = datetime.strptime(cierre_str, "%H:%M").time()
+        
+        # Verificar que esté dentro del horario de apertura
+        if check_time < apertura or check_time > cierre:
+            return False
+        
+        # Verificar que la reserva no termine después del cierre
+        check_datetime = datetime.combine(datetime.today(), check_time)
+        fin_reserva = check_datetime + timedelta(minutes=duracion_min)
+        cierre_datetime = datetime.combine(datetime.today(), cierre)
+        
+        return fin_reserva.time() <= cierre
+        
+    except Exception as e:
+        logger.error(f"Error validando horario dinámico: {e}")
+        # Fallback a validación estática
+        return is_valid_restaurant_time(check_time)
+
 def is_valid_restaurant_time(check_time: time) -> bool:
-    """Verifica si una hora está dentro del horario del restaurante"""
+    """Verifica si una hora está dentro del horario del restaurante (fallback estático)"""
     
     # Horarios típicos (ajustar según configuración real)
     lunch_start = time(13, 0)
