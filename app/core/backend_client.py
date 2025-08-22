@@ -375,7 +375,8 @@ class BackendClient:
             "duracion": int(duracion),
             "notas": str(comentarios) if comentarios else "",
             "alergias": str(alergias) if alergias else "",
-            "zona_preferida": str(zona) if zona else ""
+            "zona_preferida": str(zona) if zona else "",
+            "origen": "gpt"  # Identificar que la reserva viene del bot GPT
         }
         
         logger.info(f"Creando reserva con datos: {data}")
