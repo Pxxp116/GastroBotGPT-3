@@ -34,25 +34,118 @@ async def generate_alternative_slots(
         # Generar alternativas ±30 y ±60 minutos
         time_offsets = [-60, -30, 30, 60]
         
+        # Primero validar la hora solicitada para obtener información de último horario
+        validacion_original = await backend_client.validate_schedule(fecha, hora)
+        
+        if validacion_original.get("exito"):
+            # Si hay una sugerencia específica del sistema, usarla primero
+            if validacion_original.get("sugerencia"):
+                sugerencia = validacion_original.get("sugerencia")
+                if isinstance(sugerencia, str):
+                    # Es una hora sugerida
+                    alternatives.append({
+                        "fecha": fecha,
+                        "hora": sugerencia,
+                        "capacidad": comensales,
+                        "motivo": "Última hora de entrada disponible",
+                        "es_sugerencia_sistema": True,
+                        "mensaje": validacion_original.get("mensaje_sugerencia", f"Hora sugerida: {sugerencia}")
+                    })
+        
         for offset in time_offsets:
             # Calcular nueva hora
             new_datetime = datetime.combine(fecha_obj, hora_obj) + timedelta(minutes=offset)
+            nueva_hora = new_datetime.strftime("%H:%M")
             
-            # Validar horario usando datos frescos del backend
-            new_time = new_datetime.time()
-            if is_valid_restaurant_time_dynamic(new_time, horarios, duracion_min):
-                alternatives.append({
-                    "fecha": new_datetime.strftime("%Y-%m-%d"),
-                    "hora": new_datetime.strftime("%H:%M"),
-                    "capacidad": comensales,
-                    "duracion": duracion_min,
-                    "diferencia_minutos": offset
-                })
+            # Validar usando el nuevo sistema de validación avanzado
+            validacion = await backend_client.validate_schedule(fecha, nueva_hora, duracion_min)
+            
+            if validacion.get("exito") and validacion.get("es_valida"):
+                # Evitar duplicados
+                ya_existe = any(alt["hora"] == nueva_hora for alt in alternatives)
+                if not ya_existe:
+                    alternatives.append({
+                        "fecha": new_datetime.strftime("%Y-%m-%d"),
+                        "hora": nueva_hora,
+                        "capacidad": comensales,
+                        "duracion": duracion_min,
+                        "diferencia_minutos": offset,
+                        "motivo": f"Alternativa a {offset:+d} minutos"
+                    })
         
     except Exception as e:
         logger.error(f"Error generando alternativas: {e}")
     
     return alternatives[:3]  # Máximo 3 alternativas
+
+async def get_smart_schedule_suggestion(
+    fecha: str,
+    hora: str,
+    backend_client
+) -> Dict[str, Any]:
+    """
+    Obtiene sugerencia inteligente de horario usando el nuevo sistema de validación
+    Devuelve mensaje específico según las reglas de negocio
+    """
+    
+    try:
+        # Validar usando el nuevo endpoint
+        validacion = await backend_client.validate_schedule(fecha, hora)
+        
+        if not validacion.get("exito"):
+            return {
+                "valido": False,
+                "mensaje": "Error al validar el horario",
+                "sugerencia": None
+            }
+        
+        if validacion.get("es_valida"):
+            # Hora válida
+            return {
+                "valido": True,
+                "mensaje": "Horario válido para reserva",
+                "sugerencia": None,
+                "detalles": validacion.get("detalles", {})
+            }
+        
+        # Hora inválida - proporcionar sugerencia específica
+        motivo = validacion.get("motivo", "Hora no válida")
+        sugerencia = validacion.get("sugerencia")
+        mensaje_sugerencia = validacion.get("mensaje_sugerencia", "")
+        
+        # Construir mensaje según las reglas de negocio
+        if mensaje_sugerencia:
+            # Usar el mensaje específico del backend
+            mensaje = mensaje_sugerencia
+        elif sugerencia:
+            # Construir mensaje basado en la sugerencia
+            detalles = validacion.get("detalles", {})
+            hora_cierre = detalles.get("cierre", "cierre")
+            
+            if hora_cierre != "cierre":
+                mensaje = f"No puedo reservar a {hora} porque el local cierra a {hora_cierre}. La última hora de entrada disponible es {sugerencia}. ¿Te va bien?"
+            else:
+                mensaje = f"La última hora de entrada disponible es {sugerencia}. ¿Te va bien?"
+        else:
+            # Sin sugerencia específica
+            mensaje = motivo
+        
+        return {
+            "valido": False,
+            "mensaje": mensaje,
+            "sugerencia": sugerencia,
+            "motivo": motivo,
+            "detalles": validacion.get("detalles", {}),
+            "alternativa": validacion.get("alternativa")
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo sugerencia inteligente: {e}")
+        return {
+            "valido": False,
+            "mensaje": "Error al procesar la solicitud",
+            "sugerencia": None
+        }
 
 def is_valid_restaurant_time_dynamic(check_time: time, horarios: Dict[str, Any], duracion_min: int) -> bool:
     """

@@ -598,6 +598,53 @@ class BackendClient:
                     logger.error(f"Error verificando frescura: {e}")
         
         return result
+    
+    async def validate_schedule(
+        self,
+        fecha: str,
+        hora: str,
+        duracion: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Valida si una hora específica es válida para reservas
+        Devuelve información detallada incluyendo última hora de entrada
+        """
+        
+        logger.info(f"Validando horario: {fecha} {hora} (duración: {duracion})")
+        
+        # Si no se especifica duración, obtenerla de las políticas
+        if not duracion:
+            duracion = await self.get_duration_from_policies(force_refresh=True)
+        
+        result = await self._make_request(
+            method="POST",
+            endpoint="/validar-horario-reserva",
+            data={
+                "fecha": fecha,
+                "hora": hora,
+                "duracion": duracion
+            }
+        )
+        
+        # Enriquecer la respuesta con información útil para el chatbot
+        if result.get("exito"):
+            # Agregar mensaje específico si la hora no es válida
+            if not result.get("es_valida", False):
+                motivo = result.get("motivo", "Hora no válida")
+                sugerencia = result.get("sugerencia")
+                mensaje_sugerencia = result.get("mensaje_sugerencia", "")
+                
+                # Construir mensaje detallado
+                mensaje = motivo
+                if sugerencia and mensaje_sugerencia:
+                    mensaje = mensaje_sugerencia
+                elif sugerencia:
+                    mensaje += f". Te sugiero la hora {sugerencia}"
+                
+                result["mensaje_detallado"] = mensaje
+                result["tiene_sugerencia"] = bool(sugerencia)
+        
+        return result
 
 # Instancia global
 backend_client = BackendClient()
