@@ -226,11 +226,41 @@ async def execute_tool_call(
         from app.core.backend_client import backend_client
         
         if function_name == "check_availability":
-            return await backend_client.check_availability(
+            # Detectar verificaciones repetidas
+            import time
+            current_time = time.time()
+            last_check = conversation_state.get("last_availability_check", {})
+            
+            # Si es la misma verificación en menos de 30 segundos, es probable un loop
+            if (last_check.get("fecha") == arguments.get("fecha") and
+                last_check.get("hora") == arguments.get("hora") and
+                last_check.get("comensales") == arguments.get("comensales") and
+                last_check.get("timestamp", 0) > current_time - 30):
+                
+                logger.warning(f"Verificación repetida detectada: {arguments}")
+                # Añadir flag de advertencia
+                conversation_state["repeated_check_warning"] = True
+            
+            # Guardar esta verificación
+            conversation_state["last_availability_check"] = {
+                "fecha": arguments.get("fecha"),
+                "hora": arguments.get("hora"),
+                "comensales": arguments.get("comensales"),
+                "timestamp": current_time
+            }
+            
+            result = await backend_client.check_availability(
                 fecha=arguments.get("fecha"),
                 hora=arguments.get("hora"),
                 comensales=arguments.get("comensales")
             )
+            
+            # Si hay disponibilidad, marcar que estamos listos para crear
+            if result.get("exito") and result.get("mesa_disponible"):
+                conversation_state["ready_to_create"] = True
+                conversation_state["pending_reservation_data"] = arguments
+            
+            return result
             
         elif function_name == "create_reservation":
             # Actualizar estado con los datos de la reserva
@@ -238,6 +268,10 @@ async def execute_tool_call(
                 if value is not None:
                     conversation_state["filled_fields"] = conversation_state.get("filled_fields", {})
                     conversation_state["filled_fields"][key] = value
+            
+            # Limpiar flag de última verificación para evitar loops
+            if "last_availability_check" in conversation_state:
+                del conversation_state["last_availability_check"]
             
             result = await backend_client.create_reservation(
                 nombre=arguments.get("nombre"),

@@ -66,6 +66,16 @@ class OpenAIOrchestrator:
                             tool_call.function.name,
                             tool_result
                         )
+                        if tool_call.function.name == "create_reservation":
+                            logger.info(f"✅ Reserva creada exitosamente: {tool_result}")
+                
+                # Detectar si debería haber creado reserva pero no lo hizo
+                if conversation_state.get("repeated_check_warning") and conversation_state.get("ready_to_create"):
+                    has_create = any(tc.function.name == "create_reservation" for tc in assistant_message.tool_calls)
+                    if not has_create:
+                        logger.warning("⚠️ ADVERTENCIA: Se detectó verificación repetida pero NO se creó reserva")
+                        logger.warning(f"Estado: ready_to_create={conversation_state.get('ready_to_create')}, "
+                                     f"repeated_check={conversation_state.get('repeated_check_warning')}")
                 
                 # Si hubo tool calls, obtener respuesta final del modelo
                 if result["tool_calls"]:
