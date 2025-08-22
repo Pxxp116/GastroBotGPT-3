@@ -264,39 +264,56 @@ class BackendClient:
         # Verificar disponibilidad primero
         availability = await self.check_availability(fecha, hora, comensales)
         
-        if not availability.get("exito") or not availability.get("mesa_disponible"):
+        if not availability.get("exito"):
+            # Error del backend (validación de horarios, etc.)
+            logger.error(f"Error en check_availability: {availability.get('mensaje', 'Error desconocido')}")
+            
             # Invalidar cache si el horario fue rechazado (podría indicar datos obsoletos)
             motivo = availability.get("mensaje", "")
             if "duración" in motivo.lower() or "terminaría después" in motivo.lower():
                 logger.info("Invalidando cache por posible incompatibilidad de duración")
                 self.invalidate_duration_cache()
             
-            # Si hay sugerencia de horario, usar esa información
-            if availability.get("sugerencia") or availability.get("alternativa"):
-                sugerencia = availability.get("sugerencia") or availability.get("alternativa")
-                mensaje = availability.get("mensaje", "No hay disponibilidad para esa hora")
+            return {
+                "exito": False,
+                "mensaje": availability.get("mensaje", "Error al verificar disponibilidad"),
+                "sugerencia": availability.get("sugerencia"),
+                "alternativas": availability.get("alternativas", [])
+            }
+        
+        if not availability.get("mesa_disponible"):
+            # No hay mesa disponible, pero el backend respondió exitosamente con alternativas
+            logger.info(f"Sin mesa para {hora}, pero hay alternativas disponibles")
+            
+            alternativas = availability.get("alternativas", [])
+            sugerencia_texto = availability.get("sugerencia", "")
+            
+            # Construir mensaje con alternativas inteligentes
+            mensaje = availability.get("mensaje", f"No hay disponibilidad a las {hora}")
+            
+            if alternativas and len(alternativas) > 0:
+                primera_alternativa = alternativas[0]
+                hora_sugerida = primera_alternativa.get("hora_alternativa")
+                mesas_disponibles = primera_alternativa.get("mesas_disponibles", 1)
                 
-                if sugerencia and sugerencia.get("hora"):
-                    mensaje += f". Te sugiero la hora {sugerencia['hora']}"
-                    if sugerencia.get("mensaje"):
-                        mensaje += f" ({sugerencia['mensaje']})"
+                mensaje += f". Te sugiero reservar a las {hora_sugerida} (tengo {mesas_disponibles} mesa(s) disponible(s))"
                 
-                return {
-                    "exito": False,
-                    "mensaje": mensaje,
-                    "sugerencia": sugerencia,
-                    "alternativas": availability.get("alternativas", []),
-                    "horario_rechazado": {
-                        "fecha": fecha,
-                        "hora": hora,
-                        "motivo": availability.get("mensaje", "Fuera de horario")
-                    }
-                }
+                # Añadir más opciones si hay
+                if len(alternativas) > 1:
+                    otras_horas = [alt.get("hora_alternativa") for alt in alternativas[1:4]]  # Max 3 más
+                    mensaje += f". También tengo disponibilidad a las: {', '.join(otras_horas)}"
             
             return {
                 "exito": False,
-                "mensaje": availability.get("mensaje", "No hay mesas disponibles para esa hora"),
-                "alternativas": availability.get("alternativas", [])
+                "mensaje": mensaje,
+                "sugerencia": sugerencia_texto,
+                "alternativas": alternativas,
+                "horario_rechazado": {
+                    "fecha": fecha,
+                    "hora": hora,
+                    "motivo": "Sin disponibilidad de mesa"
+                },
+                "tiene_alternativas": len(alternativas) > 0
             }
         
         # Obtener información de la mesa
