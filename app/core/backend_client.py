@@ -282,26 +282,64 @@ class BackendClient:
             }
         
         if not availability.get("mesa_disponible"):
-            # No hay mesa disponible, pero el backend respondió exitosamente con alternativas
-            logger.info(f"Sin mesa para {hora}, pero hay alternativas disponibles")
+            # No hay mesa disponible - analizar el motivo y ofrecer alternativas claras
+            logger.info(f"Sin mesa para {hora}, analizando alternativas y conflictos")
             
             alternativas = availability.get("alternativas", [])
             sugerencia_texto = availability.get("sugerencia", "")
+            conflicto_detectado = availability.get("conflicto_detectado", False)
+            detalles_conflicto = availability.get("detalles_conflicto", "")
             
-            # Construir mensaje con alternativas inteligentes
-            mensaje = availability.get("mensaje", f"No hay disponibilidad a las {hora}")
+            # Construir mensaje informativo basado en el tipo de problema
+            if conflicto_detectado and detalles_conflicto:
+                # Hay un conflicto específico identificado
+                mensaje = f"❌ No puedo reservar a las {hora} porque hay un conflicto: {detalles_conflicto}"
+            else:
+                # Sin disponibilidad general
+                mensaje = f"❌ Lo siento, no hay disponibilidad para {personas} personas el {fecha} a las {hora}"
             
-            if alternativas and len(alternativas) > 0:
-                primera_alternativa = alternativas[0]
-                hora_sugerida = primera_alternativa.get("hora_alternativa")
-                mesas_disponibles = primera_alternativa.get("mesas_disponibles", 1)
+            # Agregar información de horario si está fuera del rango válido
+            horario_rest = availability.get("horario_restaurante", {})
+            if horario_rest.get("ultima_entrada_calculada"):
+                ultima_entrada = horario_rest["ultima_entrada_calculada"]
+                duracion = horario_rest.get("duracion_reserva", 120)
                 
-                mensaje += f". Te sugiero reservar a las {hora_sugerida} (tengo {mesas_disponibles} mesa(s) disponible(s))"
+                # Verificar si la hora solicitada es después de la última entrada
+                [h_sol, m_sol] = hora.split(':')
+                [h_ult, m_ult] = ultima_entrada.split(':')
+                minutos_sol = int(h_sol) * 60 + int(m_sol)
+                minutos_ult = int(h_ult) * 60 + int(m_ult)
+                
+                if minutos_sol > minutos_ult:
+                    mensaje = f"❌ No puedo reservar a las {hora}. Con una duración de {duracion} minutos, la última hora de entrada es {ultima_entrada}"
+            
+            # Construir sugerencias mejoradas
+            if alternativas and len(alternativas) > 0:
+                # Ordenar por cercanía si tienen diferencia_minutos
+                if alternativas[0].get("diferencia_minutos") is not None:
+                    alternativas.sort(key=lambda x: x.get("diferencia_minutos", 999))
+                
+                primera = alternativas[0]
+                hora_sugerida = primera.get("hora_alternativa")
+                mesas_disp = primera.get("mesas_disponibles", 1)
+                
+                # Mensaje principal de sugerencia
+                mensaje += f"\n\n✅ Te sugiero las **{hora_sugerida}** (hay {mesas_disp} mesa{'s' if mesas_disp > 1 else ''} disponible{'s' if mesas_disp > 1 else ''})"
                 
                 # Añadir más opciones si hay
                 if len(alternativas) > 1:
-                    otras_horas = [alt.get("hora_alternativa") for alt in alternativas[1:4]]  # Max 3 más
-                    mensaje += f". También tengo disponibilidad a las: {', '.join(otras_horas)}"
+                    otras_opciones = []
+                    for alt in alternativas[1:4]:  # Máximo 3 alternativas adicionales
+                        h = alt.get("hora_alternativa")
+                        m = alt.get("mesas_disponibles", 1)
+                        otras_opciones.append(f"{h} ({m} mesa{'s' if m > 1 else ''})")
+                    
+                    mensaje += f"\n\n📅 Otros horarios disponibles: {', '.join(otras_opciones)}"
+                
+                mensaje += "\n\n¿Te gustaría reservar en alguno de estos horarios?"
+            else:
+                # No hay alternativas en el día
+                mensaje += "\n\n📅 No encuentro disponibilidad en este día. ¿Prefieres que busque en otro día?"
             
             return {
                 "exito": False,
@@ -311,9 +349,11 @@ class BackendClient:
                 "horario_rechazado": {
                     "fecha": fecha,
                     "hora": hora,
-                    "motivo": "Sin disponibilidad de mesa"
+                    "motivo": detalles_conflicto if conflicto_detectado else "Sin mesas disponibles"
                 },
-                "tiene_alternativas": len(alternativas) > 0
+                "tiene_alternativas": len(alternativas) > 0,
+                "conflicto_detectado": conflicto_detectado,
+                "detalles_conflicto": detalles_conflicto
             }
         
         # Obtener información de la mesa
