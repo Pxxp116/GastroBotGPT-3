@@ -12,11 +12,11 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-# Cache global para la duración - MUY AGRESIVO
+# Cache global para la duración - MÍNIMO para garantizar frescura
 _duration_cache = {
-    "value": 120,  # FORZAR 120 MINUTOS INMEDIATAMENTE
-    "timestamp": datetime.now() - timedelta(hours=2),  # Forzar que esté expirado
-    "ttl_minutes": 60  # Cache por 1 hora para ser agresivo
+    "value": 120,  # Valor por defecto inicial
+    "timestamp": datetime.now() - timedelta(hours=24),  # Iniciar como expirado
+    "ttl_minutes": 1  # Cache por solo 1 minuto para máxima frescura
 }
 
 class BackendClient:
@@ -115,27 +115,31 @@ class BackendClient:
     
     async def get_duration_from_policies(self, force_refresh: bool = False) -> int:
         """
-        Obtiene la duración de reserva con cache agresivo
+        Obtiene la duración de reserva con cache mínimo para garantizar frescura
+        SIEMPRE se debe usar la configuración más reciente del Dashboard
         
         Args:
             force_refresh: Si True, fuerza actualización del cache ignorando TTL
         """
         global _duration_cache
         
-        # Verificar si el cache es válido Y no se fuerza refresh
+        # Cache muy corto (1 minuto) para garantizar datos frescos
         now = datetime.now()
+        cache_age_seconds = (now - _duration_cache["timestamp"]).total_seconds() if _duration_cache["timestamp"] else float('inf')
+        
+        # Solo usar cache si es muy reciente (< 1 minuto) Y no se fuerza refresh
         if (not force_refresh and _duration_cache["value"] and 
-            _duration_cache["timestamp"] and 
-            (now - _duration_cache["timestamp"]).total_seconds() < (_duration_cache["ttl_minutes"] * 60)):
-            logger.info(f"Usando duración desde cache: {_duration_cache['value']} minutos")
+            cache_age_seconds < 60):  # Solo 60 segundos de cache
+            logger.info(f"[CACHE] Duración desde cache ({int(cache_age_seconds)}s antiguo): {_duration_cache['value']} minutos")
             return _duration_cache["value"]
         
-        # Actualizar cache cuando sea viejo o se fuerce
+        # Actualizar cache - siempre consultar BD para máxima frescura
         try:
             if force_refresh:
-                logger.info("Forzando actualización de duración desde backend")
+                logger.info("[FRESH] Forzando actualización de duración desde backend")
             else:
-                logger.info("Cache expirado, obteniendo duración desde backend")
+                logger.info(f"[FRESH] Cache expirado ({int(cache_age_seconds)}s), obteniendo duración desde backend")
+            
             result = await self._make_request(
                 method="GET",
                 endpoint="/admin/politicas"
@@ -150,7 +154,7 @@ class BackendClient:
                 _duration_cache["value"] = duracion
                 _duration_cache["timestamp"] = now
                 
-                logger.info(f"Duración actualizada en cache: {duracion} minutos")
+                logger.info(f"[FRESH] Duración actualizada desde BD: {duracion} minutos (cache válido por 60s)")
                 return duracion
             
             logger.warning("No se pudieron obtener políticas, usando cache o default")
@@ -163,8 +167,8 @@ class BackendClient:
     def invalidate_duration_cache(self):
         """Invalida el cache de duración forzando una actualización en la próxima consulta"""
         global _duration_cache
-        _duration_cache["timestamp"] = datetime.now() - timedelta(hours=2)  # Forzar expiración
-        logger.info("Cache de duración invalidado")
+        _duration_cache["timestamp"] = datetime.now() - timedelta(hours=24)  # Forzar expiración inmediata
+        logger.info("[CACHE] Cache de duración invalidado - próxima consulta obtendrá valor fresco")
     
     async def get_fresh_restaurant_hours(self, fecha: str) -> Dict[str, Any]:
         """
@@ -221,10 +225,12 @@ class BackendClient:
     ) -> Dict[str, Any]:
         """Verifica disponibilidad para una fecha y hora"""
         
-        logger.info(f"Verificando disponibilidad: {fecha} {hora} para {comensales} personas")
+        logger.info(f"[CHECK] Verificando disponibilidad: {fecha} {hora} para {comensales} personas")
         
-        # Obtener duración dinámica del backend (forzar actualización para sugerencias precisas)
+        # CRÍTICO: Siempre obtener duración fresca para validaciones y sugerencias
+        # Esto garantiza que las sugerencias usen la configuración actual del Dashboard
         duracion = await self.get_duration_from_policies(force_refresh=True)
+        logger.info(f"[CHECK] Usando duración actualizada: {duracion} minutos")
         
         result = await self._make_request(
             method="POST",
@@ -360,8 +366,10 @@ class BackendClient:
         mesa_info = availability["mesa_disponible"]
         mesa_id = int(mesa_info.get("id", 1))
         
-        # Obtener duración dinámica del backend (forzar actualización para datos precisos)
+        # CRÍTICO: Obtener duración actualizada para la creación de reserva
+        # Siempre usar la configuración más reciente del Dashboard
         duracion = await self.get_duration_from_policies(force_refresh=True)
+        logger.info(f"[CREATE] Usando duración actualizada para crear reserva: {duracion} minutos")
         
         # Crear la reserva con valores seguros
         data = {
@@ -670,9 +678,10 @@ class BackendClient:
         
         logger.info(f"Validando horario: {fecha} {hora} (duración: {duracion})")
         
-        # Si no se especifica duración, obtenerla de las políticas
+        # CRÍTICO: Siempre obtener duración actualizada para validaciones
         if not duracion:
             duracion = await self.get_duration_from_policies(force_refresh=True)
+            logger.info(f"[VALIDATE] Obtenida duración fresca para validación: {duracion} minutos")
         
         result = await self._make_request(
             method="POST",
