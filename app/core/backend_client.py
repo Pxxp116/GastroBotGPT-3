@@ -636,14 +636,23 @@ class BackendClient:
                     break
             
             if plato_encontrado:
-                # Si se pidieron imágenes y el plato tiene imagen
-                if mostrar_imagenes and plato_encontrado.get("imagen_url"):
+                # Validar que la URL de imagen sea válida (no blob:, data:, etc.)
+                imagen_url = plato_encontrado.get("imagen_url", "")
+                es_url_valida = (
+                    imagen_url and 
+                    not imagen_url.startswith("blob:") and 
+                    not imagen_url.startswith("data:") and
+                    (imagen_url.startswith("http://") or imagen_url.startswith("https://"))
+                )
+                
+                # Si se pidieron imágenes y el plato tiene imagen válida
+                if mostrar_imagenes and es_url_valida:
                     result["plato_con_imagen"] = {
                         "nombre": plato_encontrado["nombre"],
                         "descripcion": plato_encontrado.get("descripcion", ""),
                         "precio": plato_encontrado.get("precio"),
                         "categoria": categoria_plato,
-                        "imagen_url": plato_encontrado["imagen_url"],
+                        "imagen_url": imagen_url,
                         "tiene_imagen": True
                     }
                 else:
@@ -653,7 +662,7 @@ class BackendClient:
                         "precio": plato_encontrado.get("precio"),
                         "categoria": categoria_plato,
                         "tiene_imagen": False,
-                        "mensaje": f"No hay imagen disponible para {plato_encontrado['nombre']}"
+                        "mensaje": f"Lo siento, no hay una imagen disponible de {plato_encontrado['nombre']} en este momento. Te puedo ayudar con la descripción: {plato_encontrado.get('descripcion', 'Plato de nuestra carta')}"
                     }
             else:
                 result["mensaje"] = f"No se encontró el plato '{nombre_plato}'"
@@ -673,19 +682,24 @@ class BackendClient:
                 result["mensaje"] = f"No se encontró la categoría '{categoria}'"
                 return result
         
-        # Si se pidieron imágenes, filtrar solo platos con imagen_url
+        # Si se pidieron imágenes, filtrar solo platos con imagen_url válida
         if mostrar_imagenes:
             platos_con_imagen = []
             for cat in categorias:
                 platos = cat.get("platos", [])
                 for plato in platos:
-                    if plato.get("imagen_url"):
+                    imagen_url = plato.get("imagen_url", "")
+                    # Validar que sea una URL HTTP/HTTPS válida
+                    if (imagen_url and 
+                        not imagen_url.startswith("blob:") and 
+                        not imagen_url.startswith("data:") and
+                        (imagen_url.startswith("http://") or imagen_url.startswith("https://"))):
                         platos_con_imagen.append({
                             "nombre": plato["nombre"],
                             "descripcion": plato.get("descripcion", ""),
                             "precio": plato.get("precio"),
                             "categoria": cat.get("nombre"),
-                            "imagen_url": plato["imagen_url"]
+                            "imagen_url": imagen_url
                         })
             
             result["platos_con_imagen"] = platos_con_imagen[:5]  # Límite de 5 para WhatsApp
