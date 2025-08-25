@@ -319,28 +319,46 @@ class BackendClient:
                 if minutos_sol > minutos_ult:
                     mensaje = f"❌ No puedo reservar a las {hora}. Con una duración de {duracion} minutos, la última hora de entrada es {ultima_entrada}"
             
-            # Construir sugerencias mejoradas
+            # Construir sugerencias mejoradas con información de liberación
             if alternativas and len(alternativas) > 0:
                 # Ordenar por cercanía si tienen diferencia_minutos
                 if alternativas[0].get("diferencia_minutos") is not None:
                     alternativas.sort(key=lambda x: x.get("diferencia_minutos", 999))
                 
                 primera = alternativas[0]
-                hora_sugerida = primera.get("hora_alternativa")
+                hora_sugerida = primera.get("hora_alternativa") or primera.get("hora")
                 mesas_disp = primera.get("mesas_disponibles", 1)
+                es_liberacion = primera.get("es_liberacion_mesa", False)
+                diferencia = primera.get("diferencia_minutos", 0)
                 
-                # Mensaje principal de sugerencia
-                mensaje += f"\n\n✅ Te sugiero las **{hora_sugerida}** (hay {mesas_disp} mesa{'s' if mesas_disp > 1 else ''} disponible{'s' if mesas_disp > 1 else ''})"
+                # MEJORADO: Mensaje específico según si es liberación de mesa
+                if es_liberacion:
+                    # Mesa se libera en ese momento
+                    if diferencia <= 30:
+                        mensaje += f"\n\n🔓 **La mesa se libera a las {hora_sugerida}** (justo cuando termina la reserva anterior)"
+                    else:
+                        mensaje += f"\n\n🔓 **Próxima mesa disponible a las {hora_sugerida}** (cuando se libera)"
+                else:
+                    # Mesa está libre en ese horario
+                    if diferencia <= 30:
+                        mensaje += f"\n\n✅ **Hay disponibilidad a las {hora_sugerida}** ({diferencia} minutos después)"
+                    else:
+                        mensaje += f"\n\n✅ Te sugiero las **{hora_sugerida}** (hay {mesas_disp} mesa{'s' if mesas_disp > 1 else ''} disponible{'s' if mesas_disp > 1 else ''})"
                 
                 # Añadir más opciones si hay
                 if len(alternativas) > 1:
                     otras_opciones = []
                     for alt in alternativas[1:4]:  # Máximo 3 alternativas adicionales
-                        h = alt.get("hora_alternativa")
+                        h = alt.get("hora_alternativa") or alt.get("hora")
                         m = alt.get("mesas_disponibles", 1)
-                        otras_opciones.append(f"{h} ({m} mesa{'s' if m > 1 else ''})")
+                        es_lib = alt.get("es_liberacion_mesa", False)
+                        
+                        if es_lib:
+                            otras_opciones.append(f"{h} (se libera)")
+                        else:
+                            otras_opciones.append(f"{h} ({m} mesa{'s' if m > 1 else ''})")
                     
-                    mensaje += f"\n\n📅 Otros horarios disponibles: {', '.join(otras_opciones)}"
+                    mensaje += f"\n\n📅 Otros horarios: {', '.join(otras_opciones)}"
                 
                 mensaje += "\n\n¿Te gustaría reservar en alguno de estos horarios?"
             else:
