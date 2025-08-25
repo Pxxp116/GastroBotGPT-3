@@ -593,19 +593,74 @@ class BackendClient:
             "mensaje": "No se encontró la reserva con ese código"
         }
     
-    async def get_menu(self, categoria: Optional[str] = None) -> Dict[str, Any]:
-        """Obtiene el menú del restaurante"""
+    async def get_menu(
+        self, 
+        categoria: Optional[str] = None,
+        mostrar_imagenes: bool = False,
+        nombre_plato: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Obtiene el menú del restaurante con opción de incluir imágenes
+        
+        Args:
+            categoria: Categoría específica a filtrar
+            mostrar_imagenes: Si True, incluye las URLs de imágenes cuando estén disponibles
+            nombre_plato: Nombre específico del plato para buscar (útil para imágenes)
+        """
         
         result = await self._make_request(
             method="GET",
             endpoint="/ver-menu"
         )
         
-        if categoria and result.get("exito"):
-            menu = result.get("menu", {})
-            categorias = menu.get("categorias", [])
+        if not result.get("exito"):
+            return result
+        
+        menu = result.get("menu", {})
+        categorias = menu.get("categorias", [])
+        
+        # Si se busca un plato específico
+        if nombre_plato:
+            plato_encontrado = None
+            categoria_plato = None
             
-            # Filtrar por categoría
+            for cat in categorias:
+                platos = cat.get("platos", [])
+                for plato in platos:
+                    # Búsqueda flexible por nombre
+                    if nombre_plato.lower() in plato.get("nombre", "").lower():
+                        plato_encontrado = plato
+                        categoria_plato = cat.get("nombre")
+                        break
+                if plato_encontrado:
+                    break
+            
+            if plato_encontrado:
+                # Si se pidieron imágenes y el plato tiene imagen
+                if mostrar_imagenes and plato_encontrado.get("imagen_url"):
+                    result["plato_con_imagen"] = {
+                        "nombre": plato_encontrado["nombre"],
+                        "descripcion": plato_encontrado.get("descripcion", ""),
+                        "precio": plato_encontrado.get("precio"),
+                        "categoria": categoria_plato,
+                        "imagen_url": plato_encontrado["imagen_url"],
+                        "tiene_imagen": True
+                    }
+                else:
+                    result["plato_con_imagen"] = {
+                        "nombre": plato_encontrado["nombre"],
+                        "descripcion": plato_encontrado.get("descripcion", ""),
+                        "precio": plato_encontrado.get("precio"),
+                        "categoria": categoria_plato,
+                        "tiene_imagen": False,
+                        "mensaje": f"No hay imagen disponible para {plato_encontrado['nombre']}"
+                    }
+            else:
+                result["mensaje"] = f"No se encontró el plato '{nombre_plato}'"
+                result["plato_con_imagen"] = None
+        
+        # Filtrar por categoría si se especifica
+        if categoria:
             categoria_filtrada = None
             for cat in categorias:
                 if cat.get("nombre", "").lower() == categoria.lower():
@@ -613,11 +668,62 @@ class BackendClient:
                     break
             
             if categoria_filtrada:
-                result["menu"] = {"categorias": [categoria_filtrada]}
+                categorias = [categoria_filtrada]
             else:
                 result["mensaje"] = f"No se encontró la categoría '{categoria}'"
+                return result
         
+        # Si se pidieron imágenes, filtrar solo platos con imagen_url
+        if mostrar_imagenes:
+            platos_con_imagen = []
+            for cat in categorias:
+                platos = cat.get("platos", [])
+                for plato in platos:
+                    if plato.get("imagen_url"):
+                        platos_con_imagen.append({
+                            "nombre": plato["nombre"],
+                            "descripcion": plato.get("descripcion", ""),
+                            "precio": plato.get("precio"),
+                            "categoria": cat.get("nombre"),
+                            "imagen_url": plato["imagen_url"]
+                        })
+            
+            result["platos_con_imagen"] = platos_con_imagen[:5]  # Límite de 5 para WhatsApp
+            result["total_con_imagen"] = len(platos_con_imagen)
+            
+            if not platos_con_imagen:
+                result["mensaje"] = "No hay imágenes disponibles para los platos en este momento"
+        
+        result["menu"] = {"categorias": categorias}
         return result
+    
+    async def get_dish_image(self, nombre_plato: str) -> Dict[str, Any]:
+        """
+        Busca la imagen de un plato específico
+        
+        Args:
+            nombre_plato: Nombre del plato a buscar
+            
+        Returns:
+            Diccionario con información del plato e imagen si está disponible
+        """
+        
+        # Usar get_menu con los parámetros adecuados
+        result = await self.get_menu(
+            mostrar_imagenes=True,
+            nombre_plato=nombre_plato
+        )
+        
+        if result.get("plato_con_imagen"):
+            return {
+                "exito": True,
+                "plato": result["plato_con_imagen"]
+            }
+        else:
+            return {
+                "exito": False,
+                "mensaje": result.get("mensaje", f"No se encontró el plato '{nombre_plato}'")
+            }
     
     async def get_hours(self, fecha: Optional[str] = None) -> Dict[str, Any]:
         """Obtiene los horarios del restaurante"""

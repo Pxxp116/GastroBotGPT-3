@@ -168,13 +168,22 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "get_menu",
-                "description": "Obtiene el menú del restaurante",
+                "description": "Obtiene el menú del restaurante, con opción de incluir imágenes de los platos",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "categoria": {
                             "type": "string",
                             "description": "Categoría específica del menú (entrantes, principales, postres, bebidas)"
+                        },
+                        "mostrar_imagenes": {
+                            "type": "boolean",
+                            "description": "Si true, incluye las URLs de imágenes de los platos cuando estén disponibles. SOLO usar cuando el usuario pida explícitamente ver fotos/imágenes",
+                            "default": False
+                        },
+                        "nombre_plato": {
+                            "type": "string",
+                            "description": "Nombre específico del plato para buscar su imagen (opcional, para búsquedas específicas)"
                         }
                     },
                     "additionalProperties": False
@@ -352,7 +361,9 @@ async def execute_tool_call(
             
         elif function_name == "get_menu":
             return await backend_client.get_menu(
-                categoria=arguments.get("categoria")
+                categoria=arguments.get("categoria"),
+                mostrar_imagenes=arguments.get("mostrar_imagenes", False),
+                nombre_plato=arguments.get("nombre_plato")
             )
             
         elif function_name == "get_hours":
