@@ -241,6 +241,18 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                     "additionalProperties": False
                 }
             }
+        },
+        {
+            "type": "function", 
+            "function": {
+                "name": "get_social_media",
+                "description": "Obtiene las redes sociales del restaurante (Facebook, Instagram, Twitter, TripAdvisor). USAR cuando el cliente pregunte por redes sociales, perfiles en redes, o cómo seguir al restaurante",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False
+                }
+            }
         }
     ]
 
@@ -402,6 +414,9 @@ async def execute_tool_call(
                 tipo_consulta=arguments.get("tipo_consulta", "general"),
                 tipo_politica=arguments.get("tipo_politica")
             )
+        
+        elif function_name == "get_social_media":
+            return await backend_client.get_social_media_info()
             
         else:
             return {

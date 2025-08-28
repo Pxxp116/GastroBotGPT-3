@@ -775,6 +775,98 @@ class BackendClient:
             "mensaje": "No se pudieron obtener las políticas"
         }
     
+    async def get_social_media_info(self) -> Dict[str, Any]:
+        """
+        Obtiene las redes sociales del restaurante en tiempo real
+        Consulta el archivo espejo para datos actualizados
+        """
+        
+        logger.info("Consultando redes sociales del restaurante")
+        
+        try:
+            # Obtener datos del espejo (siempre actualizados)
+            espejo_result = await self._make_request(
+                method="GET", 
+                endpoint="/espejo"
+            )
+            
+            if not espejo_result.get("exito"):
+                logger.error("Error obteniendo espejo para redes sociales")
+                return {
+                    "exito": False,
+                    "mensaje": "No se pudo obtener información de redes sociales en este momento"
+                }
+            
+            # Extraer información del restaurante del espejo
+            datos_espejo = espejo_result.get("datos", {})
+            restaurante = datos_espejo.get("restaurante", {})
+            
+            # Extraer redes sociales configuradas
+            redes_sociales = {
+                "facebook": restaurante.get("facebook", ""),
+                "instagram": restaurante.get("instagram", ""),
+                "twitter": restaurante.get("twitter", ""),
+                "tripadvisor": restaurante.get("tripadvisor", "")
+            }
+            
+            # Filtrar solo las redes sociales que tienen valor
+            redes_configuradas = {
+                red: valor for red, valor in redes_sociales.items() 
+                if valor and valor.strip()
+            }
+            
+            # Determinar el mensaje de respuesta
+            if not redes_configuradas:
+                mensaje = "No tenemos redes sociales configuradas en este momento."
+                # Obtener información de contacto alternativa
+                telefono = restaurante.get("telefono", "")
+                email = restaurante.get("email", "")
+                if telefono:
+                    mensaje += f" Puedes contactarnos por teléfono al {telefono}"
+                if email:
+                    mensaje += f" o por email a {email}"
+            else:
+                # Construir mensaje con las redes disponibles
+                redes_texto = []
+                for red, valor in redes_configuradas.items():
+                    if red == "facebook":
+                        redes_texto.append(f"Facebook: facebook.com/{valor}")
+                    elif red == "instagram":
+                        prefijo = "@" if not valor.startswith("@") else ""
+                        redes_texto.append(f"Instagram: {prefijo}{valor}")
+                    elif red == "twitter":
+                        prefijo = "@" if not valor.startswith("@") else ""
+                        redes_texto.append(f"Twitter: {prefijo}{valor}")
+                    elif red == "tripadvisor":
+                        if valor.startswith("http"):
+                            redes_texto.append(f"TripAdvisor: {valor}")
+                        else:
+                            redes_texto.append(f"TripAdvisor: {valor}")
+                
+                if len(redes_texto) == 1:
+                    mensaje = f"Puedes encontrarnos en {redes_texto[0]}"
+                else:
+                    mensaje = "Puedes encontrarnos en:\n" + "\n".join([f"• {red}" for red in redes_texto])
+            
+            logger.info(f"Redes sociales obtenidas: {len(redes_configuradas)} configuradas")
+            
+            return {
+                "exito": True,
+                "redes_sociales": redes_configuradas,
+                "mensaje": mensaje,
+                "total_configuradas": len(redes_configuradas),
+                "fuente": "espejo",
+                "timestamp": espejo_result.get("datos", {}).get("ultima_actualizacion")
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo redes sociales: {e}")
+            return {
+                "exito": False,
+                "mensaje": "Error al consultar las redes sociales del restaurante",
+                "error": str(e)
+            }
+    
     async def get_mirror(self) -> Dict[str, Any]:
         """Obtiene el archivo espejo completo"""
         
@@ -894,7 +986,12 @@ class BackendClient:
                     "email": restaurante.get("email", ""),
                     "web": restaurante.get("web", restaurante.get("sitio_web", "")),
                     "tipo_cocina": restaurante.get("tipo_cocina", ""),
-                    "descripcion": restaurante.get("descripcion", "")
+                    "descripcion": restaurante.get("descripcion", ""),
+                    # Incluir redes sociales
+                    "facebook": restaurante.get("facebook", ""),
+                    "instagram": restaurante.get("instagram", ""),
+                    "twitter": restaurante.get("twitter", ""),
+                    "tripadvisor": restaurante.get("tripadvisor", "")
                 }
                 
                 # Log de fallback si aplica
