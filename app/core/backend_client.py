@@ -803,6 +803,165 @@ class BackendClient:
         
         return result
     
+    async def get_restaurant_info(
+        self,
+        tipo_consulta: str = "general",
+        tipo_politica: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Obtiene información del restaurante con fallback automático
+        
+        Args:
+            tipo_consulta: 'general' para info básica, 'politicas' para políticas específicas
+            tipo_politica: tipo específico de política (ej: 'fumadores')
+        """
+        
+        logger.info(f"Consultando información del restaurante: {tipo_consulta}, política: {tipo_politica}")
+        
+        # Endpoint principal según el tipo de consulta
+        endpoint_principal = "/admin/restaurante" if tipo_consulta == "general" else "/admin/politicas"
+        usa_fallback = False
+        
+        try:
+            # Intentar endpoint principal primero
+            logger.info(f"[RESTAURANT_INFO] Consultando endpoint principal: {endpoint_principal}")
+            result = await self._make_request(
+                method="GET",
+                endpoint=endpoint_principal
+            )
+            
+            # Si el endpoint principal falla o devuelve 404, usar espejo
+            if not result.get("exito") or "404" in str(result.get("mensaje", "")):
+                logger.warning(f"[RESTAURANT_INFO] Endpoint principal falló, usando espejo como fallback")
+                usa_fallback = True
+                
+                # Obtener datos del espejo
+                espejo_result = await self._make_request(
+                    method="GET",
+                    endpoint="/espejo"
+                )
+                
+                if espejo_result.get("exito"):
+                    espejo_data = espejo_result.get("espejo", {})
+                    
+                    if tipo_consulta == "general":
+                        # Información general del restaurante
+                        restaurante = espejo_data.get("restaurante", {})
+                        result = {
+                            "exito": True,
+                            "restaurante": restaurante,
+                            "fuente": "espejo",
+                            "fallback_usado": True
+                        }
+                    elif tipo_consulta == "politicas":
+                        # Políticas del restaurante
+                        politicas = espejo_data.get("politicas", {})
+                        result = {
+                            "exito": True,
+                            "politicas": politicas,
+                            "fuente": "espejo", 
+                            "fallback_usado": True
+                        }
+                else:
+                    logger.error("[RESTAURANT_INFO] Tanto endpoint principal como espejo fallaron")
+                    return {
+                        "exito": False,
+                        "mensaje": "No se pudo obtener información del restaurante en este momento",
+                        "error_tipo": "system_unavailable"
+                    }
+            else:
+                # Endpoint principal exitoso
+                result["fuente"] = "principal"
+                result["fallback_usado"] = False
+        
+        except Exception as e:
+            logger.error(f"[RESTAURANT_INFO] Error consultando información: {e}")
+            return {
+                "exito": False,
+                "mensaje": "Error al consultar información del restaurante",
+                "error": str(e)
+            }
+        
+        # Procesar y formatear la respuesta según el tipo de consulta
+        if result.get("exito"):
+            if tipo_consulta == "general":
+                # Extraer información general
+                restaurante = result.get("restaurante", {})
+                info_formateada = {
+                    "nombre": restaurante.get("nombre", ""),
+                    "telefono": restaurante.get("telefono", ""),
+                    "direccion": restaurante.get("direccion", ""),
+                    "email": restaurante.get("email", ""),
+                    "web": restaurante.get("web", restaurante.get("sitio_web", "")),
+                    "tipo_cocina": restaurante.get("tipo_cocina", ""),
+                    "descripcion": restaurante.get("descripcion", "")
+                }
+                
+                # Log de fallback si aplica
+                if usa_fallback:
+                    logger.warning(f"[RESTAURANT_INFO] Información obtenida del espejo (fallback): {info_formateada.get('nombre', 'Sin nombre')}")
+                else:
+                    logger.info(f"[RESTAURANT_INFO] Información obtenida del endpoint principal: {info_formateada.get('nombre', 'Sin nombre')}")
+                
+                return {
+                    "exito": True,
+                    "informacion": info_formateada,
+                    "fuente": result.get("fuente"),
+                    "fallback_usado": usa_fallback
+                }
+                
+            elif tipo_consulta == "politicas":
+                # Extraer políticas específicas
+                politicas = result.get("politicas", {})
+                
+                if tipo_politica:
+                    # Consulta específica de política
+                    if tipo_politica == "fumadores":
+                        fumadores_permitidos = politicas.get("fumadores_terraza", None)
+                        if fumadores_permitidos is not None:
+                            politica_info = {
+                                "tipo": "fumadores",
+                                "permitido": bool(fumadores_permitidos),
+                                "detalles": "Se permite fumar en la terraza" if fumadores_permitidos else "No se permite fumar"
+                            }
+                        else:
+                            politica_info = {
+                                "tipo": "fumadores",
+                                "permitido": None,
+                                "detalles": "Política de fumadores no configurada"
+                            }
+                    else:
+                        # Otras políticas
+                        politica_info = {
+                            "tipo": tipo_politica,
+                            "valor": politicas.get(tipo_politica),
+                            "detalles": f"Información sobre {tipo_politica}"
+                        }
+                    
+                    # Log de fallback si aplica
+                    if usa_fallback:
+                        logger.warning(f"[RESTAURANT_INFO] Política {tipo_politica} obtenida del espejo (fallback): {politica_info}")
+                    else:
+                        logger.info(f"[RESTAURANT_INFO] Política {tipo_politica} obtenida del endpoint principal: {politica_info}")
+                    
+                    return {
+                        "exito": True,
+                        "politica": politica_info,
+                        "fuente": result.get("fuente"),
+                        "fallback_usado": usa_fallback
+                    }
+                else:
+                    # Todas las políticas
+                    logger.info(f"[RESTAURANT_INFO] Todas las políticas obtenidas de {'espejo' if usa_fallback else 'endpoint principal'}")
+                    return {
+                        "exito": True,
+                        "politicas": politicas,
+                        "fuente": result.get("fuente"),
+                        "fallback_usado": usa_fallback
+                    }
+        
+        return result
+
     async def validate_schedule(
         self,
         fecha: str,

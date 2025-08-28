@@ -218,6 +218,29 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                     "additionalProperties": False
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_restaurant_info",
+                "description": "Obtiene información específica del restaurante (nombre, políticas como fumadores, información general). USAR SIEMPRE antes de responder preguntas sobre el restaurante",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "tipo_consulta": {
+                            "type": "string",
+                            "enum": ["general", "politicas"],
+                            "description": "Tipo de información: 'general' para nombre/dirección/teléfono, 'politicas' para políticas específicas como fumadores"
+                        },
+                        "tipo_politica": {
+                            "type": "string",
+                            "description": "Para consultas de política específica: 'fumadores', 'cancelacion', 'ninos', 'mascotas', etc."
+                        }
+                    },
+                    "required": ["tipo_consulta"],
+                    "additionalProperties": False
+                }
+            }
         }
     ]
 
@@ -373,6 +396,12 @@ async def execute_tool_call(
             
         elif function_name == "get_policies":
             return await backend_client.get_policies()
+        
+        elif function_name == "get_restaurant_info":
+            return await backend_client.get_restaurant_info(
+                tipo_consulta=arguments.get("tipo_consulta", "general"),
+                tipo_politica=arguments.get("tipo_politica")
+            )
             
         else:
             return {
