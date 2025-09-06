@@ -15,12 +15,25 @@ async def get_system_prompt(conversation_state: Dict[str, Any], backend_client=N
         except Exception:
             pass  # Use fallback
     
+    # Sanitizar variables para evitar errores de formato
+    safe_current_time = str(current_time) if current_time else 'No definido'
+    safe_duration_min = str(duration_min) if duration_min else '120'
+    safe_timezone = str(settings.TIMEZONE) if settings.TIMEZONE else 'Europe/Madrid'
+    
+    # Sanitizar valores del conversation_state
+    safe_intent = str(conversation_state.get('intent', 'No definido'))
+    safe_filled_fields = str(conversation_state.get('filled_fields', {}))
+    safe_missing_fields = str(conversation_state.get('missing_fields', []))
+    safe_current_reservation = str(conversation_state.get('current_reservation', {}))
+    safe_ready_to_create = str(conversation_state.get('ready_to_create', False))
+    safe_repeated_check = str(conversation_state.get('repeated_check_warning', False))
+    
     prompt = f"""Eres un asistente de reservas para GastroBot, un sistema profesional de gestión de reservas de restaurante.
 
 INFORMACIÓN DEL SISTEMA:
-- Fecha y hora actual: {current_time}
-- Duración estándar de reserva: {duration_min} minutos
-- Zona horaria: {settings.TIMEZONE}
+- Fecha y hora actual: {safe_current_time}
+- Duración estándar de reserva: {safe_duration_min} minutos
+- Zona horaria: {safe_timezone}
 
 PRINCIPIOS FUNDAMENTALES:
 1. MANTENER CONTEXTO: No reiniciar flujos. Si el usuario ya proporcionó información, no volver a pedirla.
@@ -30,12 +43,12 @@ PRINCIPIOS FUNDAMENTALES:
 5. **IDENTIFICACIÓN OBLIGATORIA**: Para modificar o cancelar, SIEMPRE pedir primero el CÓDIGO DE RESERVA.
 
 ESTADO ACTUAL DE LA CONVERSACIÓN:
-- Intent detectado: {conversation_state.get('intent', 'No definido')}
-- Campos completados: {conversation_state.get('filled_fields', {})}
-- Campos faltantes: {conversation_state.get('missing_fields', [])}
-- Reserva actual: {conversation_state.get('current_reservation', {})}
-- Listo para crear: {conversation_state.get('ready_to_create', False)}
-- Advertencia verificación repetida: {conversation_state.get('repeated_check_warning', False)}
+- Intent detectado: {safe_intent}
+- Campos completados: {safe_filled_fields}
+- Campos faltantes: {safe_missing_fields}
+- Reserva actual: {safe_current_reservation}
+- Listo para crear: {safe_ready_to_create}
+- Advertencia verificación repetida: {safe_repeated_check}
 
 REGLAS DE INTERACCIÓN:
 1. Tono cercano y profesional (máximo 2-3 frases por respuesta)
