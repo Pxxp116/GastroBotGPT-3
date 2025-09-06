@@ -279,25 +279,37 @@ async def format_confirmation_message(action: str, data: Dict[str, Any], backend
             except Exception:
                 pass  # Use fallback
         
+        # Sanitizar datos para evitar errores de formato
+        fecha = data.get('fecha', '')
+        hora = data.get('hora', '')
+        comensales = data.get('comensales', '')
+        nombre = data.get('nombre', '')
+        telefono = mask_phone(data.get('telefono', ''))
+        zona = data.get('zona', 'Sin preferencia')
+        duracion = data.get('duracion_min', duration_min)
+        
         return f"""📝 Confirmo estos datos para tu reserva:
-- Fecha: {data.get('fecha')}
-- Hora: {data.get('hora')}
-- Personas: {data.get('comensales')}
-- Nombre: {data.get('nombre')}
-- Teléfono: {mask_phone(data.get('telefono', ''))}
-- Zona: {data.get('zona', 'Sin preferencia')}
-- Duración: {data.get('duracion_min', duration_min)} minutos
+- Fecha: {fecha}
+- Hora: {hora}
+- Personas: {comensales}
+- Nombre: {nombre}
+- Teléfono: {telefono}
+- Zona: {zona}
+- Duración: {duracion} minutos
 
 ¿Confirmas la reserva?"""
     
     elif action == "modificar":
-        return f"""✏️ Voy a modificar tu reserva {data.get('codigo_reserva', '')} con estos cambios:
-{format_changes(data.get('cambios', {}))}
+        codigo_reserva = data.get('codigo_reserva', '')
+        cambios = format_changes(data.get('cambios', {}))
+        return f"""✏️ Voy a modificar tu reserva {codigo_reserva} con estos cambios:
+{cambios}
 
 ¿Confirmo los cambios?"""
     
     elif action == "cancelar":
-        return f"""❌ Voy a cancelar la reserva con código: {data.get('codigo_reserva', '')}
+        codigo_reserva = data.get('codigo_reserva', '')
+        return f"""❌ Voy a cancelar la reserva con código: {codigo_reserva}
 
 ¿Confirmas la cancelación? (Esta acción no se puede deshacer)"""
     
@@ -326,25 +338,32 @@ def format_success_message(action: str, result: Dict[str, Any]) -> str:
     codigo = result.get('codigo_reserva', '')
     
     if action == "crear":
+        mesa_info = result.get('mesa', {})
+        mesa_numero = mesa_info.get('numero', 'asignada') if isinstance(mesa_info, dict) else 'asignada'
+        fecha = result.get('fecha', '')
+        hora = result.get('hora', '')  
+        personas = result.get('personas', '')
+        
         return f"""✅ ¡Reserva confirmada!
 
 **CÓDIGO DE RESERVA: {codigo}**
 (Guarda este código para modificar o cancelar)
 
 Detalles:
-- Mesa {result.get('mesa', {}).get('numero', 'asignada')}
-- {result.get('fecha')} a las {result.get('hora')}
-- {result.get('personas')} personas
+- Mesa {mesa_numero}
+- {fecha} a las {hora}
+- {personas} personas
 
 Te esperamos. ¡Gracias por tu reserva!"""
     
     elif action == "modificar":
+        cambios_realizados = format_changes(result.get('cambios_realizados', {}))
         return f"""✅ Reserva modificada correctamente
 
 Tu código sigue siendo: **{codigo}**
 
 Nuevos datos confirmados:
-{format_changes(result.get('cambios_realizados', {}))}"""
+{cambios_realizados}"""
     
     elif action == "cancelar":
         return f"""✅ Reserva cancelada
@@ -390,13 +409,15 @@ def format_alternatives(alternatives: list) -> str:
     
     lines = ["🕐 Horarios alternativos disponibles:"]
     for i, alt in enumerate(alternatives[:3], 1):
-        lines.append(f"{i}. {alt['hora']} - Mesa para {alt['capacidad']} personas")
+        hora = alt.get('hora', '') if isinstance(alt, dict) else ''
+        capacidad = alt.get('capacidad', '') if isinstance(alt, dict) else ''
+        lines.append(f"{i}. {hora} - Mesa para {capacidad} personas")
     
     return "\n".join(lines)
 
 def mask_phone(phone: str) -> str:
     """Enmascara el número de teléfono para privacidad"""
-    if len(phone) < 4:
+    if not phone or not isinstance(phone, str) or len(phone) < 4:
         return "***"
     return f"***{phone[-4:]}"
 
