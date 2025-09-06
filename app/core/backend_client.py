@@ -4,6 +4,7 @@ Versión corregida con manejo obligatorio de códigos de reserva
 """
 
 import httpx
+import asyncio
 import logging
 from typing import Dict, Any, Optional
 from app.core.config import settings
@@ -60,58 +61,76 @@ class BackendClient:
         data: Optional[Dict] = None,
         params: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """Realiza una petición HTTP al backend"""
-        
+        """
+        Hace peticiones al backend con auto-retry si está dormido
+        Railway despierta el backend automáticamente en la primera petición
+        """
         url = f"{self.base_url}{endpoint}"
+        max_retries = 3
+        retry_delay = 2
         
-        try:
-            logger.info(f"Llamando {method} {url} (intento 1)")
-            
-            if data:
-                logger.info(f"Datos enviados: {data}")
-            
-            response = await self.client.request(
-                method=method,
-                url=url,
-                json=data,
-                params=params
-            )
-            
-            logger.info(f"Respuesta recibida: {response.status_code}")
-            
-            if response.status_code >= 400:
-                logger.error(f"Error HTTP {response.status_code}: {response.text}")
-                return {
-                    "exito": False,
-                    "mensaje": f"Error del servidor: {response.status_code}"
-                }
-            
-            result = response.json()
-            
-            # Log del resultado para debug
-            if not result.get("exito"):
-                logger.warning(f"Operación fallida: {result.get('mensaje')}")
-            
-            return result
-            
-        except httpx.TimeoutException:
-            logger.error(f"Timeout llamando a {url}")
-            return {
-                "exito": False,
-                "mensaje": "El servidor tardó demasiado en responder"
-            }
-        except httpx.RequestError as e:
-            logger.error(f"Error de conexión: {e}")
-            return {
-                "exito": False,
-                "mensaje": "Error de conexión con el servidor"
-            }
-        except Exception as e:
-            logger.error(f"Error inesperado: {e}", exc_info=True)
-            return {
-                "exito": False,
-                "mensaje": "Error procesando la solicitud"
-            }
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    logger.info(f"🔄 Llamando {method} {url} (intento {attempt + 1})")
+                    
+                    response = await client.request(
+                        method=method,
+                        url=url,
+                        json=data,
+                        params=params,
+                        timeout=30  # Timeout más alto para dar tiempo a despertar
+                    )
+                    
+                    logger.info(f"✅ Respuesta: {response.status_code}")
+                    
+                    if response.status_code == 503:
+                        # Backend está despertando
+                        logger.info(f"⏳ Backend despertando, esperando {retry_delay}s...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 1.5  # Aumentar delay progresivamente
+                        continue
+                    
+                    if response.status_code >= 400:
+                        logger.error(f"Error HTTP {response.status_code}: {response.text}")
+                        return {
+                            "exito": False,
+                            "mensaje": f"Error del servidor: {response.status_code}"
+                        }
+                    
+                    return response.json()
+                    
+            except httpx.ConnectError as e:
+                # Backend está dormido o despertando
+                if attempt == 0:
+                    logger.info("💤 Backend está dormido, despertando...")
+                else:
+                    logger.info(f"⏳ Esperando que despierte... (intento {attempt + 1})")
+                
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 1.5
+                
+            except httpx.ReadTimeout:
+                # El primer request puede tardar más mientras despierta
+                if attempt == 0:
+                    logger.info("⏰ Timeout en primer intento, backend despertando...")
+                    await asyncio.sleep(5)  # Dar más tiempo la primera vez
+                    continue
+                else:
+                    raise
+                    
+            except Exception as e:
+                logger.error(f"❌ Error inesperado: {e}")
+                if attempt == max_retries - 1:
+                    return {
+                        "exito": False,
+                        "mensaje": "El servidor no está disponible en este momento. Por favor, intenta en unos segundos."
+                    }
+        
+        return {
+            "exito": False,
+            "mensaje": "No se pudo conectar con el servidor"
+        }
     
     async def get_duration_from_policies(self, force_refresh: bool = False) -> int:
         """
