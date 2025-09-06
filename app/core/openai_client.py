@@ -90,6 +90,10 @@ class OpenAIOrchestrator:
             
         except Exception as e:
             logger.error(f"Error en OpenAI orchestrator: {e}")
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Error args: {e.args}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {
                 "message": format_error_message(str(e)),
                 "tool_calls": [],
@@ -103,28 +107,54 @@ class OpenAIOrchestrator:
         conversation_history: List[Dict[str, str]]
     ) -> List[Dict[str, Any]]:
         """Construye el array de mensajes para OpenAI"""
-        messages = []
+        try:
+            logger.info("Building messages - start")
+            messages = []
+            
+            # System prompt con duración dinámica
+            from app.core.backend_client import backend_client
+            # Sanitizar conversation_state para logging seguro
+            safe_state = {}
+            try:
+                for key, value in conversation_state.items():
+                    safe_state[key] = str(value) if value is not None else 'None'
+            except:
+                safe_state = {'error': 'Could not serialize conversation_state'}
+            logger.info(f"Getting system prompt with conversation_state: {safe_state}")
+            system_prompt = await get_system_prompt(conversation_state, backend_client)
+            logger.info(f"System prompt generated successfully, length: {len(system_prompt) if system_prompt else 0}")
+            messages.append({
+                "role": "system",
+                "content": system_prompt
+            })
+        except Exception as e:
+            logger.error(f"Error in _build_messages during system_prompt: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
         
-        # System prompt con duración dinámica
-        from app.core.backend_client import backend_client
-        system_prompt = await get_system_prompt(conversation_state, backend_client)
-        messages.append({
-            "role": "system",
-            "content": system_prompt
-        })
-        
-        # Historial relevante (últimos N mensajes)
-        history_limit = 10
-        for msg in conversation_history[-history_limit:]:
-            messages.append(msg)
-        
-        # Mensaje actual del usuario
-        messages.append({
-            "role": "user",
-            "content": user_message
-        })
-        
-        return messages
+        try:
+            # Historial relevante (últimos N mensajes)
+            logger.info("Adding conversation history")
+            history_limit = 10
+            for msg in conversation_history[-history_limit:]:
+                messages.append(msg)
+            
+            # Mensaje actual del usuario
+            logger.info(f"Adding user message: {user_message}")
+            messages.append({
+                "role": "user",
+                "content": user_message
+            })
+            
+            logger.info(f"Messages built successfully, total: {len(messages)}")
+            return messages
+            
+        except Exception as e:
+            logger.error(f"Error in _build_messages during history/user message: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
     
     async def _execute_tool(
         self,
