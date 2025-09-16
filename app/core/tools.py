@@ -243,13 +243,61 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
             }
         },
         {
-            "type": "function", 
+            "type": "function",
             "function": {
                 "name": "get_social_media",
                 "description": "Obtiene las redes sociales del restaurante (Facebook, Instagram, Twitter, TripAdvisor). USAR cuando el cliente pregunte por redes sociales, perfiles en redes, o cómo seguir al restaurante",
                 "parameters": {
                     "type": "object",
                     "properties": {},
+                    "additionalProperties": False
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "create_order",
+                "description": "Crea un nuevo pedido de comida para delivery o takeaway. Usar cuando el cliente quiera hacer un pedido de comida",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cliente_nombre": {
+                            "type": "string",
+                            "description": "Nombre completo del cliente"
+                        },
+                        "cliente_telefono": {
+                            "type": "string",
+                            "description": "Teléfono del cliente"
+                        },
+                        "detalles_pedido": {
+                            "type": "array",
+                            "description": "Lista de platos pedidos con cantidades",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "plato": {"type": "string", "description": "Nombre del plato"},
+                                    "cantidad": {"type": "integer", "description": "Cantidad solicitada"},
+                                    "precio_unitario": {"type": "number", "description": "Precio por unidad"},
+                                    "notas": {"type": "string", "description": "Notas especiales del plato"}
+                                },
+                                "required": ["plato", "cantidad", "precio_unitario"]
+                            }
+                        },
+                        "total": {
+                            "type": "number",
+                            "description": "Total del pedido en euros"
+                        },
+                        "mesa_id": {
+                            "type": "integer",
+                            "description": "ID de mesa si es para consumo en el local (opcional)"
+                        },
+                        "notas": {
+                            "type": "string",
+                            "description": "Notas adicionales del pedido (alergias, instrucciones especiales)"
+                        }
+                    },
+                    "required": ["cliente_nombre", "cliente_telefono", "detalles_pedido", "total"],
                     "additionalProperties": False
                 }
             }
@@ -417,7 +465,27 @@ async def execute_tool_call(
         
         elif function_name == "get_social_media":
             return await backend_client.get_social_media_info()
-            
+
+        elif function_name == "create_order":
+            # Llamar al backend para crear el pedido
+            result = await backend_client.create_order(
+                cliente_nombre=arguments.get("cliente_nombre"),
+                cliente_telefono=arguments.get("cliente_telefono"),
+                detalles_pedido=arguments.get("detalles_pedido"),
+                total=arguments.get("total"),
+                mesa_id=arguments.get("mesa_id"),
+                notas=arguments.get("notas")
+            )
+
+            # Actualizar estado de conversación si el pedido fue exitoso
+            if result.get("exito"):
+                conversation_state["current_order"] = result.get("pedido", {})
+                # Guardar ID del pedido en el estado
+                if result.get("id_pedido"):
+                    conversation_state["last_order_id"] = result["id_pedido"]
+
+            return result
+
         else:
             return {
                 "exito": False,
@@ -483,7 +551,23 @@ def validate_tool_arguments(
         missing = [field for field in required if not arguments.get(field)]
         if missing:
             return False, f"Faltan datos para verificar disponibilidad: {', '.join(missing)}"
-    
+
+    elif function_name == "create_order":
+        required = ["cliente_nombre", "cliente_telefono", "detalles_pedido", "total"]
+        missing = [field for field in required if not arguments.get(field)]
+        if missing:
+            return False, f"Faltan datos obligatorios para crear el pedido: {', '.join(missing)}"
+
+        # Validar que detalles_pedido no esté vacío
+        detalles = arguments.get("detalles_pedido", [])
+        if not detalles or len(detalles) == 0:
+            return False, "El pedido debe contener al menos un plato"
+
+        # Validar que el total sea mayor que 0
+        total = arguments.get("total", 0)
+        if total <= 0:
+            return False, "El total del pedido debe ser mayor que 0"
+
     return True, ""
 
 def extract_reservation_code_from_message(message: str) -> str:

@@ -1088,14 +1088,14 @@ class BackendClient:
         Valida si una hora específica es válida para reservas
         Devuelve información detallada incluyendo última hora de entrada
         """
-        
+
         logger.info(f"Validando horario: {fecha} {hora} (duración: {duracion})")
-        
+
         # CRÍTICO: Siempre obtener duración actualizada para validaciones
         if not duracion:
             duracion = await self.get_duration_from_policies(force_refresh=True)
             logger.info(f"[VALIDATE] Obtenida duración fresca para validación: {duracion} minutos")
-        
+
         result = await self._make_request(
             method="POST",
             endpoint="/validar-horario-reserva",
@@ -1105,7 +1105,7 @@ class BackendClient:
                 "duracion": duracion
             }
         )
-        
+
         # Enriquecer la respuesta con información útil para el chatbot
         if result.get("exito"):
             # Agregar mensaje específico si la hora no es válida
@@ -1113,17 +1113,46 @@ class BackendClient:
                 motivo = result.get("motivo", "Hora no válida")
                 sugerencia = result.get("sugerencia")
                 mensaje_sugerencia = result.get("mensaje_sugerencia", "")
-                
+
                 # Construir mensaje detallado
                 mensaje = motivo
                 if sugerencia and mensaje_sugerencia:
                     mensaje = mensaje_sugerencia
                 elif sugerencia:
                     mensaje += f". Te sugiero la hora {sugerencia}"
-                
+
                 result["mensaje_detallado"] = mensaje
                 result["tiene_sugerencia"] = bool(sugerencia)
-        
+
+        return result
+
+    async def create_order(
+        self,
+        cliente_nombre: str,
+        cliente_telefono: str,
+        detalles_pedido: list,
+        total: float,
+        mesa_id: Optional[int] = None,
+        notas: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Crea un nuevo pedido"""
+
+        logger.info(f"Creando pedido para {cliente_nombre} - Total: {total}€")
+
+        result = await self._make_request(
+            method="POST",
+            endpoint="/crear-pedido",
+            data={
+                "cliente_nombre": cliente_nombre,
+                "cliente_telefono": cliente_telefono,
+                "detalles_pedido": detalles_pedido,
+                "total": total,
+                "mesa_id": mesa_id,
+                "notas": notas,
+                "origen": "gpt"
+            }
+        )
+
         return result
 
 # Instancia global
