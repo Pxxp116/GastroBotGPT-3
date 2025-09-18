@@ -29,7 +29,7 @@ async def get_system_prompt(conversation_state: Dict[str, Any], backend_client=N
     safe_repeated_check = str(conversation_state.get('repeated_check_warning', False))
     
     # Construir prompt usando concatenación segura en lugar de f-string
-    prompt = "Eres un asistente de reservas para GastroBot, un sistema profesional de gestión de reservas de restaurante.\n\n"
+    prompt = "Eres un asistente inteligente para GastroBot, un sistema profesional de gestión de restaurantes que maneja reservas Y PEDIDOS.\n\n"
     
     prompt += "INFORMACIÓN DEL SISTEMA:\n"
     prompt += "- Fecha y hora actual: " + safe_current_time + "\n"
@@ -64,19 +64,61 @@ async def get_system_prompt(conversation_state: Dict[str, Any], backend_client=N
     
     prompt += "FLUJO DE RESERVA:\n"
     prompt += "1. Recopilar datos: nombre, teléfono, fecha, hora, comensales\n"
-    prompt += "2. Verificar disponibilidad con check_availability\n"  
+    prompt += "2. Verificar disponibilidad con check_availability\n"
     prompt += "3. Si confirma → LLAMAR create_reservation\n\n"
-    
-    prompt += "CÓDIGOS DE RESERVA: Alfanuméricos 8 caracteres (ABC12345)\n"
+
+    prompt += "FLUJO DE PEDIDOS:\n"
+    prompt += "1. Cuando el cliente quiera pedir comida → USAR get_menu para mostrar opciones\n"
+    prompt += "2. Recopilar: nombre cliente, teléfono, platos con cantidades\n"
+    prompt += "3. Calcular total (suma de precio_unitario * cantidad)\n"
+    prompt += "4. Confirmar pedido con el cliente\n"
+    prompt += "5. Si confirma → LLAMAR create_order\n"
+    prompt += "6. Proporcionar ID único del pedido (8 caracteres)\n\n"
+
+    prompt += "CÓDIGOS:\n"
+    prompt += "- Reservas: Alfanuméricos 8 caracteres (ABC12345)\n"
+    prompt += "- Pedidos: Alfanuméricos 8 caracteres (PED12ABC)\n"
     prompt += "Para modificar/cancelar: CÓDIGO OBLIGATORIO\n\n"
+
+    prompt += "IMPORTANTE PARA PEDIDOS:\n"
+    prompt += "- Siempre mostrar el menú primero con get_menu\n"
+    prompt += "- Confirmar cada plato con su precio antes de proceder\n"
+    prompt += "- Calcular y mostrar el total antes de confirmar\n"
+    prompt += "- Proporcionar el ID único del pedido al finalizar\n"
+    prompt += "- Estados del pedido: pendiente → en_preparacion → entregado\n\n"
+
     prompt += "Mantener contexto y ser eficiente."
     
     return prompt
 
 async def format_confirmation_message(action: str, data: Dict[str, Any], backend_client=None) -> str:
     """Formatea mensaje de confirmación antes de ejecutar acción"""
-    
-    if action == "crear":
+
+    if action == "crear_pedido":
+        nombre = data.get('cliente_nombre', '')
+        telefono = mask_phone(data.get('cliente_telefono', ''))
+        detalles = data.get('detalles_pedido', [])
+        total = data.get('total', 0)
+
+        mensaje = f"""🛒 Confirmo estos datos para tu pedido:
+- Cliente: {nombre}
+- Teléfono: {telefono}
+
+📋 Detalle del pedido:"""
+
+        for item in detalles:
+            plato = item.get('plato', '')
+            cantidad = item.get('cantidad', 0)
+            precio = item.get('precio_unitario', 0)
+            subtotal = cantidad * precio
+            mensaje += f"\n  • {cantidad}x {plato} - €{precio:.2f} c/u = €{subtotal:.2f}"
+
+        mensaje += f"\n\n💰 TOTAL: €{total:.2f}"
+        mensaje += "\n\n¿Confirmas tu pedido? Responde SÍ para procesar."
+
+        return mensaje
+
+    elif action == "crear":
         # Obtener duración dinámica del backend si está disponible
         duration_min = settings.DEFAULT_DURATION_MIN  # Fallback
         if backend_client:
